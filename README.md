@@ -25,9 +25,15 @@ uv sync --extra dev
 uv run pytest                 # unit tests, no live mic/speaker/joe needed
 
 # with a joe engine already running (`uv run joe backend`, from ../../joe):
+uv run vox doctor                         # checks joe is reachable, has a mic, and TTS works
 uv run vox self-report clip.wav           # clip.wav must be under joe's Data/Audio/ or Data/Voice/
 uv run vox self-report --duration 5       # record from the mic instead
 ```
+
+`vox doctor` exists so a live demo fails here, with a specific reason
+(joe unreachable / no microphone / TTS won't initialize), rather than
+partway through a recording with an opaque error. `self-report --duration`
+runs the same check itself before recording.
 
 ## Why this shape
 

@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import httpx
+
 from vox.stt import JoeSTT
 
 
@@ -40,3 +42,39 @@ def test_listen_posts_duration_and_returns_text_and_path():
         params={"duration": 3.0},
         timeout=13.0,
     )
+
+
+def test_devices_returns_the_engines_report():
+    stt = JoeSTT(base_url="http://127.0.0.1:8000")
+    payload = {"devices": [{"index": 1, "name": "Mic", "channels": 2, "default": True}], "microphone_available": True}
+    fake_resp = _fake_response(payload)
+
+    with patch("vox.stt.httpx.get", return_value=fake_resp) as mock_get:
+        result = stt.devices()
+
+    assert result == payload
+    mock_get.assert_called_once_with("http://127.0.0.1:8000/api/voice/devices", timeout=60.0)
+
+
+def test_devices_reports_unavailable_when_joe_is_unreachable():
+    stt = JoeSTT(base_url="http://127.0.0.1:8000")
+
+    with patch("vox.stt.httpx.get", side_effect=httpx.ConnectError("refused")):
+        result = stt.devices()
+
+    assert result == {"devices": [], "microphone_available": False}
+
+
+def test_reachable_true_on_200():
+    stt = JoeSTT(base_url="http://127.0.0.1:8000")
+    fake_resp = MagicMock(status_code=200)
+
+    with patch("vox.stt.httpx.get", return_value=fake_resp):
+        assert stt.reachable() is True
+
+
+def test_reachable_false_when_joe_is_unreachable():
+    stt = JoeSTT(base_url="http://127.0.0.1:8000")
+
+    with patch("vox.stt.httpx.get", side_effect=httpx.ConnectError("refused")):
+        assert stt.reachable() is False

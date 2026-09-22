@@ -49,3 +49,31 @@ class JoeSTT:
         resp.raise_for_status()
         data = resp.json()
         return data["text"], data["audio_path"]
+
+    def devices(self) -> dict:
+        """Audio input devices the joe engine's own machine can see.
+
+        Recording happens on joe's side, not vox's, so "is there a
+        microphone" is a question about that machine — this is how a caller
+        checks before attempting `listen()`, rather than finding out from an
+        opaque failure partway through.
+
+        Returns `{"devices": [...], "microphone_available": bool}`. If joe
+        can't be reached at all, `microphone_available` is False and
+        `devices` is empty rather than raising — unreachable and
+        no-microphone both mean "listen() will not work right now".
+        """
+        try:
+            resp = httpx.get(f"{self.base_url}/api/voice/devices", timeout=self.timeout)
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPError:
+            return {"devices": [], "microphone_available": False}
+
+    def reachable(self) -> bool:
+        """Whether the joe engine answers at all, distinct from whether it has a mic."""
+        try:
+            resp = httpx.get(f"{self.base_url}/api/health", timeout=self.timeout)
+            return resp.status_code == 200
+        except httpx.HTTPError:
+            return False
