@@ -28,14 +28,13 @@ against it.
 
 ## What this does not show
 
-The engine is `vox.engine`, a codec with joe's HTTP contract around it. It
+The engine is `vox.engine`, a codec with an `EngineContract` around it. It
 carries the text faithfully because that is what a codec does. **No claim
-is made here about whisper**, which is the thing a real joe would use, and
-which can mis-hear. For that, run the same loop against a real engine:
+is made here about transcription accuracy**, which is what a real engine
+would be doing and what can mis-hear. For that, run the same loop against one:
 
 ```sh
-uv run joe backend            # in ../../joe
-uv run vox loop               # no --offline
+uv run vox loop               # no --offline; --engine names the adapter
 ```
 
 That run is not deterministic and is not in this suite. It answers the

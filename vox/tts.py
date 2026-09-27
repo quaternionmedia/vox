@@ -1,10 +1,12 @@
-"""Text-to-speech: the other half of the seam, owned locally by vox (not joe —
-joe is analysis only, synthesis is a different concern).
+"""Text-to-speech: the contract, and the backend that needs no hardware.
+
+Synthesis is the half of the seam vox owns, because it is the half with no
+engine behind it. What vox states is the protocol; a backend that drives a
+real synthesizer is an adapter and lives in `vox.adapters`.
 """
 
 import hashlib
 import os
-from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -17,48 +19,22 @@ class TextToSpeech(Protocol):
         ...
 
 
-class Pyttsx3TTS:
-    """Offline TTS via pyttsx3 (SAPI5 / NSSpeechSynthesizer / espeak, depending on platform).
-
-    The default backend so vox works out of the box with no cloud dependency
-    and no model download — swap in another `TextToSpeech` implementation
-    (piper, coqui, a cloud API) without touching the seam.
-    """
-
-    def __init__(self, out_dir: str = "Data/Voice/out"):
-        self.out_dir = out_dir
-
-    def speak(self, text: str, out_path: str | None = None) -> str:
-        import pyttsx3
-
-        os.makedirs(self.out_dir, exist_ok=True)
-        if out_path is None:
-            stamp = datetime.now().strftime("%m-%d-%y_%H-%M-%S")
-            out_path = os.path.join(self.out_dir, f"speak_{stamp}.wav")
-
-        engine = pyttsx3.init()
-        engine.save_to_file(text, out_path)
-        engine.runAndWait()
-        return out_path
-
-
 class RecordingTTS:
     """Deterministic synthesis: writes the WAV, drives no sound card.
 
-    `Pyttsx3TTS` hands the text to SAPI5/NSSpeech/espeak, which needs an
-    audio device, takes a variable amount of wall-clock time, and produces
-    different bytes on different machines. None of that can be asserted on,
-    so the loop it sits in can only ever be run by hand.
+    A real synthesizer needs an audio device, takes a variable amount of
+    wall-clock time, and produces different bytes on different machines.
+    None of that can be asserted on, so a loop built around one can only
+    ever be run by hand.
 
     This backend writes the same file every time for the same text, via
-    `vox.engine.encode_wav`, which `vox.engine`'s transcribe route reads
-    back. That is what closes the loop offline: the text really does travel
-    out to a file on disk and come back in through the engine's HTTP
-    contract, rather than being carried around the side in a mock's return
-    value.
+    `vox.engine.encode_wav`, which the deterministic engine's transcribe
+    route reads back. That is what closes the loop offline: the text really
+    does travel out to a file on disk and come back in over HTTP, rather
+    than being carried around the side in a mock's return value.
 
     It is a codec and not a voice. Nobody can listen to the output and hear
-    words — for that, use `Pyttsx3TTS` against a real engine.
+    words — for that, use a real synthesizer adapter against a real engine.
     """
 
     def __init__(self, out_dir: str = "Data/Voice/out"):

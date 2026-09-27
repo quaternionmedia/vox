@@ -1,7 +1,7 @@
-"""`JoeSTT`'s side of the wire, driven through an injected client.
+"""`HttpSTT`'s side of the wire, driven through an injected client.
 
 These used to patch `vox.stt.httpx.post`, which worked because every call
-built its own client at module level. `JoeSTT` now holds one — see its
+built its own client at module level. `HttpSTT` now holds one — see its
 docstring for why — so the tests hand it a client instead of patching the
 module. That is the better seam anyway: it exercises the `client=`
 parameter a caller would use, rather than reaching inside.
@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import httpx
 
-from vox.stt import JoeSTT
+from vox.stt import HttpSTT
 
 
 def _fake_response(payload: dict):
@@ -21,8 +21,8 @@ def _fake_response(payload: dict):
     return resp
 
 
-def _stt_with(client, **kwargs) -> JoeSTT:
-    return JoeSTT(base_url=kwargs.pop("base_url", "http://127.0.0.1:8000"), client=client, **kwargs)
+def _stt_with(client, **kwargs) -> HttpSTT:
+    return HttpSTT(kwargs.pop("base_url", "http://127.0.0.1:8000"), client=client, **kwargs)
 
 
 def test_transcribe_file_posts_filename_and_returns_text():
@@ -95,18 +95,18 @@ def test_one_client_serves_every_call():
     nothing fails — the loop just gets slow again — so the test is here to
     make the regression loud.
     """
-    stt = JoeSTT(base_url="http://127.0.0.1:8000")
+    stt = HttpSTT("http://127.0.0.1:8000")
     assert stt.client is stt.client
 
 
 def test_it_does_not_build_a_client_until_one_is_needed():
-    """Constructing a JoeSTT stays free; `vox doctor` builds several."""
-    stt = JoeSTT(base_url="http://127.0.0.1:8000")
+    """Constructing an HttpSTT stays free; `vox doctor` builds several."""
+    stt = HttpSTT("http://127.0.0.1:8000")
     assert stt._client is None
 
 
 def test_it_closes_the_client_it_built():
-    stt = JoeSTT(base_url="http://127.0.0.1:8000")
+    stt = HttpSTT("http://127.0.0.1:8000")
     with stt:
         client = stt.client
     assert client.is_closed
@@ -114,9 +114,9 @@ def test_it_closes_the_client_it_built():
 
 
 def test_it_leaves_a_client_it_was_given_alone():
-    """A caller sharing one client across several JoeSTTs keeps the right to close it."""
+    """A caller sharing one client across several clients keeps the right to close it."""
     client = httpx.Client()
-    with JoeSTT(base_url="http://127.0.0.1:8000", client=client):
+    with HttpSTT("http://127.0.0.1:8000", client=client):
         pass
     assert not client.is_closed
     client.close()

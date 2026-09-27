@@ -18,7 +18,7 @@ import pytest
 
 from vox.engine import EngineState, encode_wav, serve
 from vox.session import VoiceSession
-from vox.stt import JoeSTT
+from vox.stt import HttpSTT
 from vox.tts import RecordingTTS
 
 SAID = "approve the deploy"
@@ -31,7 +31,7 @@ def _run_loop(audio_dir: Path) -> tuple:
     state = EngineState(
         audio_dirs=[audio_dir], microphone="deterministic engine", heard=SAID, capture_dir=audio_dir
     )
-    with serve(state) as (base_url, state), JoeSTT(base_url=base_url) as stt:
+    with serve(state) as (base_url, state), HttpSTT(base_url) as stt:
         assert stt.reachable(), "the engine did not answer its own health check"
         session = VoiceSession(stt=stt, tts=RecordingTTS(), echo_dir=str(audio_dir))
         result = session.round_trip("said.wav")
@@ -129,14 +129,13 @@ against it.
 
 ## What this does not show
 
-The engine is `vox.engine`, a codec with joe's HTTP contract around it. It
+The engine is `vox.engine`, a codec with an `EngineContract` around it. It
 carries the text faithfully because that is what a codec does. **No claim
-is made here about whisper**, which is the thing a real joe would use, and
-which can mis-hear. For that, run the same loop against a real engine:
+is made here about transcription accuracy**, which is what a real engine
+would be doing and what can mis-hear. For that, run the same loop against one:
 
 ```sh
-uv run joe backend            # in ../../joe
-uv run vox loop               # no --offline
+uv run vox loop               # no --offline; --engine names the adapter
 ```
 
 That run is not deterministic and is not in this suite. It answers the

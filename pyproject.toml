@@ -24,14 +24,14 @@ vox = "vox.cli:app"
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-# Named explicitly, not auto-discovered. `walkthrough/` is a second
-# top-level directory, and auto-discovery refuses a flat layout with more
-# than one — it cannot tell a package from a folder of tests. joe hit the
-# same class of thing: `Modules/` was never installed, so the console
-# script failed on any path that did not happen to have the repo root on
-# sys.path.
-packages = ["vox"]
+[tool.setuptools.packages.find]
+# `include`, not an explicit list. `packages = ["vox"]` shipped a wheel with
+# no `vox/adapters/` in it, because an explicit list is not recursive -- the
+# editable install used for development resolves against the source tree and
+# hides that completely. joe had the same defect for the same reason. The CI
+# step that builds a wheel and reads its manifest is what catches it now, and
+# `vox*` means a new subpackage is included without anyone remembering to.
+include = ["vox*"]
 
 [tool.pytest.ini_options]
 # The walkthrough runs with the tests, per the charter's show-it-by-running-it:
