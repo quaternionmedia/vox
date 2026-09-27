@@ -57,12 +57,17 @@ def test_it_went_over_the_wire(loop):
     Without this the suite would pass just as well if `round_trip` handed
     the text to itself — which is what every vox test did before
     `vox.engine` existed.
+
+    The echo is a *bare* filename. It was `out/echo.wav`, which vox's own
+    engine accepts and a real one refuses: a name with a separator in it is
+    how a path traversal gets in, so engines reject it. This assertion is
+    where that would be caught next time.
     """
     _, requests = loop
     assert requests == [
         "/api/health",
         "/api/voice/transcribe?filename=said.wav",
-        "/api/voice/transcribe?filename=out%2Fecho.wav",
+        "/api/voice/transcribe?filename=echo.wav",
     ]
 
 

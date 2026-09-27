@@ -48,11 +48,17 @@ def _resolve(engine: str, url: str | None):
 def _synthesizer(voice: str):
     """Look a synthesizer up the same way an engine is looked up.
 
-    `--voice recording` is the deterministic backend the seam owns; anything
+    Two are vox's own and need nothing installed: `recording`, a codec that
+    is not audible as words, and `formant`, which is audible and which
+    whisper cannot read (`vox.synth.SPEECH_IS_NOT_TRANSCRIBABLE`). Anything
     else names a module in `vox.adapters` exporting a class of that name.
     """
     if voice == "recording":
         return RecordingTTS()
+    if voice == "formant":
+        from vox.synth import FormantTTS
+
+        return FormantTTS()
 
     import importlib
 
@@ -169,6 +175,7 @@ def loop(
     Run both — they answer different questions.
     """
     contract, base_url = _resolve(engine, url)
+    tts = _synthesizer("recording" if offline else voice)
 
     with contextlib.ExitStack() as stack:
         if offline:
@@ -179,10 +186,17 @@ def loop(
                 contract=contract,
             )
             base_url, _ = stack.enter_context(serve_engine(state))
-            encode_wav(say, Path(echo_dir) / "said.wav")
             typer.echo(f"engine:     {base_url} (vox.engine on an ephemeral port, {engine} contract)")
         else:
             typer.echo(f"engine:     {base_url} ({engine})")
+
+        # **THE INPUT IS SYNTHESIZED, IN BOTH MODES, BY THE BACKEND THAT WILL
+        # SPEAK THE ECHO.** Only the offline branch wrote `said.wav` before,
+        # so `vox loop` against a real engine transcribed a file nothing had
+        # created and died on a 404. Using one backend for both legs also
+        # makes the comparison mean something: the same voice goes out and
+        # comes back.
+        tts.speak(say, out_path=str(Path(echo_dir) / "said.wav"))
 
         stt = stack.enter_context(HttpSTT(base_url, contract=contract))
         # Ask what is listening before believing anything measured against it:
@@ -191,7 +205,7 @@ def loop(
             typer.echo(f"[fail] nothing answering at {base_url} -- run `vox doctor`.", err=True)
             raise typer.Exit(1)
 
-        session = VoiceSession(stt=stt, tts=_synthesizer("recording" if offline else voice), echo_dir=echo_dir)
+        session = VoiceSession(stt=stt, tts=tts, echo_dir=echo_dir)
         result = session.round_trip("said.wav")
 
     typer.echo(f"heard:      {result.heard!r}")

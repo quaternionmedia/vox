@@ -122,6 +122,22 @@ MUTATIONS = [
         why="With a leftover file from a previous run the loop still closes. This is the stale-artifact hole, and it is why the walkthrough uses a fresh directory.",
     ),
     Mutation(
+        name="the synthesizer stops being deterministic",
+        path="vox/synth.py",
+        find='    rng = random.Random(hashlib.sha256(text.encode("utf-8")).digest())',
+        replace="    rng = random.Random()",
+        catches="tests/test_synth.py::test_the_same_text_gives_the_same_bytes",
+        why="An unseeded rng puts a clock in the fricatives, so the same words produce a different file every run and any recorded artifact churns.",
+    ),
+    Mutation(
+        name="the synthesizer ignores its input",
+        path="vox/synth.py",
+        find="    words = [w for w in text.split() if w.strip()]",
+        replace='    words = ["aa"]',
+        catches="tests/test_synth.py::test_different_text_gives_different_bytes",
+        why="One sound for every phrase. The determinism test passes perfectly against it, which is why that test is not enough on its own.",
+    ),
+    Mutation(
         name="every call builds its own client again",
         path="vox/stt.py",
         find="        if self._client is None:\n            self._client = httpx.Client(timeout=self.timeout)\n        return self._client",
