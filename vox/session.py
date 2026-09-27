@@ -88,15 +88,21 @@ class VoiceSession:
             output_audio_path=output_path,
         )
 
-    def round_trip(self, filename: str, echo_as: str = "out/echo.wav") -> RoundTrip:
+    def round_trip(self, filename: str, echo_as: str = "echo.wav") -> RoundTrip:
         """Close the loop: transcribe, speak the transcript, transcribe that.
 
         `echo_as` is the name *the engine* will be asked for, resolved under
-        `echo_dir` on the way out. It carries a subdirectory by default
-        because an engine typically resolves a name against one or two
-        directories of its own and requires only that the result stay inside
-        them — so `out/echo.wav` lands somewhere of vox's making rather than
-        alongside whatever the engine itself has recorded there.
+        `echo_dir` on the way out.
+
+        **A bare filename, with no directory in it.** The default was
+        `out/echo.wav`, on the reasoning that an engine resolves a name
+        against its own directories and only requires the result to stay
+        inside them. That is not what engines do: the one vox was built
+        against refuses any name containing a separator, because accepting
+        one is how a path traversal gets in. The two were never exercised
+        together — this method had only ever run against vox's own engine,
+        which is laxer — so the default 404'd against the real thing on its
+        first run.
 
         The loop closing proves the seam carried the text; it does not prove
         the transcription was right. Both legs run through the same engine,

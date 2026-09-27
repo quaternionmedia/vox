@@ -15,8 +15,10 @@ mic/file --> speech engine (STT over HTTP) --> transcript --> vox TTS --> audio 
   paths, the parameter names, the response keys. It is a value, so pointing
   vox at a different engine is a constructor argument rather than a new class.
 - **`HttpSTT`** drives any engine matching one.
-- **`TextToSpeech`** is the synthesis protocol. `RecordingTTS` is the
-  deterministic backend that needs no hardware.
+- **`TextToSpeech`** is the synthesis protocol, with three backends:
+  `recording` (a codec, deterministic, not audible as words), `formant`
+  (audible, deterministic, nothing to install) and `pyttsx3` (a real system
+  voice). `--voice` picks one.
 - **`VoiceSession`** is the orchestration. `self_report_*` proves audio → text
   → audio; `round_trip` closes the loop by handing vox's own output back.
 - **`vox.adapters`** is the only place a product is named, and naming one is
@@ -62,6 +64,25 @@ rather than three terminals.
 file faithfully, which proves the seam and proves nothing about transcription
 accuracy. Running `vox loop` without `--offline` answers that other half, and
 is not deterministic. Both are worth running; they are different questions.
+
+## Which voice to use
+
+| `--voice` | Audible | Deterministic | Needs installing | Whisper reads it |
+|---|---|---|---|---|
+| `recording` | no | yes | nothing | only vox's own engine |
+| `formant` | yes | yes | nothing | **no** |
+| `pyttsx3` | yes | no | a system voice | yes |
+
+`formant` is a small formant synthesizer in pure Python: audible speech-like
+audio for any text, on any machine, with nothing to install. **Whisper does
+not read it** — measured against a live engine, where it returned empty
+while real synthesis through the identical path came back exactly. It is for
+hearing what a loop said on a machine with no system voice, not for closing
+a loop through transcription. `vox.synth.SPEECH_IS_NOT_TRANSCRIBABLE` says
+so next to the measurement.
+
+Closing the loop through a real engine needs `pyttsx3` or another real
+voice, which is the default.
 
 ## Pointing vox at something else
 

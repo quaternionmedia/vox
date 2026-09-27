@@ -32,6 +32,7 @@ REQUIRED = [
     "vox/engine.py",
     "vox/session.py",
     "vox/stt.py",
+    "vox/synth.py",
     "vox/tts.py",
     "vox/cli.py",
     "vox/adapters/__init__.py",

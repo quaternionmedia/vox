@@ -19,7 +19,7 @@ wrong, the walkthrough is wrong.
 
 1. `/api/health`
 2. `/api/voice/transcribe?filename=said.wav`
-3. `/api/voice/transcribe?filename=out%2Fecho.wav`
+3. `/api/voice/transcribe?filename=echo.wav`
 
 Three requests, over HTTP, on a port the OS chose. The first is the
 identity check: a 200 proves something is listening, not that it is the
