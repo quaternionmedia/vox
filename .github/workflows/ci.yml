@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev
+
+      # The walkthrough runs here too — it is collected by `testpaths`, so
+      # there is no second command to remember.
+      - name: tests and walkthrough
+        run: uv run pytest -q
+
+      # The walkthrough rewrites `walkthrough/closed-loop.md` as it runs. If
+      # the committed copy differs, the artifact describes behaviour the code
+      # no longer has, which is the failure mode a recorded artifact exists to
+      # make impossible. Drift is a fail rather than a silent overwrite.
+      - name: the recorded walkthrough is current
+        run: git diff --exit-code -- walkthrough/closed-loop.md
+
+  mutations:
+    # Every guard in this repo, broken on purpose, checked for going red.
+    # Its own job because it runs the suite once per mutation and the local
+    # loop is meant to stay under ten seconds — so this rides CI rather than
+    # `pytest`, and the drift check below is what keeps the record honest.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev
+
+      - name: every guard has been seen to fail
+        run: uv run python walkthrough/mutate.py
+
+      - name: the recorded mutations are current
+        run: git diff --exit-code -- walkthrough/mutations.md
