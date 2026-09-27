@@ -11,6 +11,22 @@ import vox.cli as cli
 runner = CliRunner()
 
 
+def _fake_stt(**attrs) -> MagicMock:
+    """A stand-in JoeSTT that also works as a context manager.
+
+    `doctor` and `loop` close the client they build, so they use the
+    instance with `with`. A bare MagicMock's `__enter__` returns a *new*
+    mock, so the configured one would be silently unused and every
+    assertion below would be about a different object.
+    """
+    stt = MagicMock()
+    stt.__enter__.return_value = stt
+    stt.__exit__.return_value = False
+    for name, value in attrs.items():
+        getattr(stt, name).return_value = value
+    return stt
+
+
 def _install_fake_pyttsx3(monkeypatch, should_raise: bool = False):
     fake = ModuleType("pyttsx3")
     if should_raise:
@@ -22,12 +38,13 @@ def _install_fake_pyttsx3(monkeypatch, should_raise: bool = False):
 
 def test_doctor_reports_ready_when_everything_works(monkeypatch):
     _install_fake_pyttsx3(monkeypatch)
-    fake_stt = MagicMock()
-    fake_stt.reachable.return_value = True
-    fake_stt.devices.return_value = {
-        "devices": [{"index": 1, "name": "USB Mic", "channels": 2, "default": True}],
-        "microphone_available": True,
-    }
+    fake_stt = _fake_stt(
+        reachable=True,
+        devices={
+            "devices": [{"index": 1, "name": "USB Mic", "channels": 2, "default": True}],
+            "microphone_available": True,
+        },
+    )
 
     with patch("vox.cli.JoeSTT", return_value=fake_stt):
         result = runner.invoke(cli.app, ["doctor"])
@@ -40,8 +57,7 @@ def test_doctor_reports_ready_when_everything_works(monkeypatch):
 
 def test_doctor_fails_when_joe_unreachable(monkeypatch):
     _install_fake_pyttsx3(monkeypatch)
-    fake_stt = MagicMock()
-    fake_stt.reachable.return_value = False
+    fake_stt = _fake_stt(reachable=False)
 
     with patch("vox.cli.JoeSTT", return_value=fake_stt):
         result = runner.invoke(cli.app, ["doctor"])
@@ -53,9 +69,7 @@ def test_doctor_fails_when_joe_unreachable(monkeypatch):
 
 def test_doctor_fails_when_no_microphone(monkeypatch):
     _install_fake_pyttsx3(monkeypatch)
-    fake_stt = MagicMock()
-    fake_stt.reachable.return_value = True
-    fake_stt.devices.return_value = {"devices": [], "microphone_available": False}
+    fake_stt = _fake_stt(reachable=True, devices={"devices": [], "microphone_available": False})
 
     with patch("vox.cli.JoeSTT", return_value=fake_stt):
         result = runner.invoke(cli.app, ["doctor"])
@@ -66,12 +80,13 @@ def test_doctor_fails_when_no_microphone(monkeypatch):
 
 def test_doctor_fails_when_tts_does_not_initialize(monkeypatch):
     _install_fake_pyttsx3(monkeypatch, should_raise=True)
-    fake_stt = MagicMock()
-    fake_stt.reachable.return_value = True
-    fake_stt.devices.return_value = {
-        "devices": [{"index": 1, "name": "Mic", "channels": 2, "default": True}],
-        "microphone_available": True,
-    }
+    fake_stt = _fake_stt(
+        reachable=True,
+        devices={
+            "devices": [{"index": 1, "name": "Mic", "channels": 2, "default": True}],
+            "microphone_available": True,
+        },
+    )
 
     with patch("vox.cli.JoeSTT", return_value=fake_stt):
         result = runner.invoke(cli.app, ["doctor"])
@@ -81,8 +96,7 @@ def test_doctor_fails_when_tts_does_not_initialize(monkeypatch):
 
 
 def test_self_report_live_refuses_without_a_microphone(monkeypatch):
-    fake_stt = MagicMock()
-    fake_stt.devices.return_value = {"devices": [], "microphone_available": False}
+    fake_stt = _fake_stt(devices={"devices": [], "microphone_available": False})
 
     with patch("vox.cli.JoeSTT", return_value=fake_stt):
         result = runner.invoke(cli.app, ["self-report"])

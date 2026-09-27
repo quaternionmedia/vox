@@ -23,3 +23,17 @@ vox = "vox.cli:app"
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Named explicitly, not auto-discovered. `walkthrough/` is a second
+# top-level directory, and auto-discovery refuses a flat layout with more
+# than one — it cannot tell a package from a folder of tests. joe hit the
+# same class of thing: `Modules/` was never installed, so the console
+# script failed on any path that did not happen to have the repo root on
+# sys.path.
+packages = ["vox"]
+
+[tool.pytest.ini_options]
+# The walkthrough runs with the tests, per the charter's show-it-by-running-it:
+# a worked example nobody executes is prose, and prose drifts.
+testpaths = ["tests", "walkthrough"]

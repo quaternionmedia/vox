@@ -18,7 +18,9 @@ mic/file --> joe (analysis engine, STT via whisper, over HTTP) --> transcript --
 - **vox** (this repo) — the seam. Owns no audio DSP: `JoeSTT` is an `httpx`
   client against joe's `/api/voice/*`, `Pyttsx3TTS` is local offline synthesis.
   `VoiceSession.self_report_file/_live()` proves the audio -> text -> audio
-  round trip in one call.
+  round trip in one call. `VoiceSession.round_trip()` closes it, by handing
+  vox's own output back to the engine, and `vox.engine` is a deterministic
+  stand-in for joe so that trip runs with no hardware — see PR #1.
 - **qmcp** (`../qmcp`) — a consumer. `qmcp/integrations/voice/adapter.py` adds
   `parse_yes_no()` and `VoiceApprovalLoop`, which answers qmcp's human-in-the-loop
   approval queue by voice instead of by typing `qmcp human respond`. Wired into
@@ -26,11 +28,13 @@ mic/file --> joe (analysis engine, STT via whisper, over HTTP) --> transcript --
 
 ## State on arrival
 
-Everything is committed and pushed, each on its own branch, with draft PRs
-open for review — nothing has been merged:
+Everything is committed and pushed, each on its own branch. Nothing has been
+merged. A pull request here is an audit record rather than a review request:
+it runs the gates and leaves the diff readable, and the human gates are
+ratification and the version tag.
 
-- `vox`: `main` @ latest, pushed to `quaternionmedia/vox` (new repo, no PR --
-  nothing to merge into yet).
+- `vox`: `main` @ `2a54677`, plus **PR #1** (`feat/deterministic-loop`) adding
+  the closed deterministic loop -- open, both CI jobs green, unmerged.
 - `joe`: branch `feat/voice-interaction`, PR #9 in `quaternionmedia/joe`.
 - `qmcp`: branch `feat/voice-interaction`, PR #38 (draft) in
   `quaternionmedia/qmcp`, vendoring `vox` as a real git submodule at `./vox`
@@ -66,8 +70,12 @@ curl -X POST "http://localhost:8000/api/voice/listen?duration=5"   # needs a rea
 ```sh
 cd vox   # this repo
 uv sync --extra dev
-uv run pytest -q          # expect: 15 passed
+uv run pytest -q          # tests + walkthrough; on PR #1, 54 passed
+uv run vox loop --offline # the closed loop, no joe and no hardware, ~0.7s
 ```
+
+`vox loop --offline` and the walkthrough need nothing running. Everything
+below this line needs a real joe.
 
 With joe's backend running (step 1):
 
@@ -200,9 +208,13 @@ Ctrl+C to stop.
 - No ADRs drafted anywhere. `joe` has no governance/qm submodule at all;
   `qmcp`'s AGENTS.md requires an ADR draft for an architecture decision like
   this before the PR is more than a proposal.
-- No test exists that starts joe's backend and drives it through vox
-  automatically — every real round trip in this document, including
-  `vox doctor` against real hardware, was checked by hand, not by CI.
+- **The round trip now runs unattended, in vox PR #1** — `vox.engine` serves
+  joe's `/api/voice/*` contract over real HTTP on an ephemeral port, so
+  `uv run pytest` closes the loop with no engine, no model and no hardware,
+  and CI runs it. What is still hand-checked is the *live* path: no test
+  starts a real joe and drives whisper through it, and no test drives real
+  `pyttsx3`. Those are the claims the deterministic loop deliberately does
+  not make.
 - `qmcp human voice`'s `--forever` mode has no upper bound on how long it
   waits when the queue is empty (real `time.sleep` in a real loop) — fine at
   a terminal, not something to run unattended yet.
@@ -211,7 +223,14 @@ Ctrl+C to stop.
 - `joe`'s branch was built on top of an already-open, unmerged branch
   (`docs/onboarding-hardening`, PR #8) rather than off a clean default —
   PR #9 is stacked on it and will show that PR's diff too until #8 merges
-  first.
+  first. **It cannot simply be retargeted onto `joe`'s `main`**: that branch
+  is from 2024-12-12 and contains no `api.py`, `cli.py`, `pyproject.toml` or
+  `tests/`, so the voice work has nothing to stand on there, and
+  `main..feat/voice-interaction` is 22 commits. #9 also reads `CONFLICTING`
+  for a reason unrelated to the stacking: `origin/docs/onboarding-hardening`
+  moved five commits ahead of where the voice branch was cut, two of them
+  hardening filename handling on the audio routes. Rebasing onto the current
+  base is the action that resolves it, and it needs a person.
 
 ## Files touched, for review
 

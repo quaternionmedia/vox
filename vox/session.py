@@ -6,6 +6,7 @@ HITL wiring sit on top of this, never replacing it.
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from vox.stt import SpeechToText
 from vox.tts import TextToSpeech
@@ -20,12 +21,47 @@ class SelfReport:
     output_audio_path: str
 
 
+@dataclass
+class RoundTrip:
+    """The result of one *closed* loop: audio -> text -> audio -> text.
+
+    `SelfReport` stops at the audio it produced, so the last leg is checked
+    by a person listening. This carries the transcript of vox's own output,
+    which is the first fact in the chain a test can assert on.
+    """
+
+    heard: str
+    """Transcript of the input audio."""
+
+    spoken_path: str
+    """Where the synthesized reply was written."""
+
+    echoed: str
+    """Transcript of that reply, read back through the same engine."""
+
+    input_audio_path: str | None = None
+
+    @property
+    def closed(self) -> bool:
+        """Whether the text survived the trip out through audio and back."""
+        return self.echoed == self.heard
+
+
 class VoiceSession:
     """Orchestrates one STT backend and one TTS backend. Owns no audio itself."""
 
-    def __init__(self, stt: SpeechToText, tts: TextToSpeech):
+    def __init__(self, stt: SpeechToText, tts: TextToSpeech, echo_dir: str | None = None):
         self.stt = stt
         self.tts = tts
+        self.echo_dir = echo_dir
+        """Directory the STT engine resolves filenames against, for `round_trip`.
+
+        Closing the loop means handing vox's own output back to the engine,
+        and the engine takes a *filename it can already see* rather than an
+        upload — joe has no endpoint that accepts bytes. So the two have to
+        share a filesystem, which is true of the local dev loop this is for
+        and not true of a joe on another host.
+        """
 
     def self_report_file(self, filename: str) -> SelfReport:
         """Transcribe an existing audio file, then speak the transcript back.
@@ -48,4 +84,35 @@ class VoiceSession:
             transcript=transcript,
             input_audio_path=input_path,
             output_audio_path=output_path,
+        )
+
+    def round_trip(self, filename: str, echo_as: str = "out/echo.wav") -> RoundTrip:
+        """Close the loop: transcribe, speak the transcript, transcribe that.
+
+        `echo_as` is the name *the engine* will be asked for, resolved under
+        `echo_dir` on the way out. It carries a subdirectory by default
+        because joe resolves a name against `Data/Audio` and `Data/Voice`
+        and only requires that the result stay inside one of them — so
+        `out/echo.wav` lands in a directory of vox's own making rather than
+        alongside the recordings joe captured.
+
+        The loop closing proves the seam carried the text; it does not prove
+        the transcription was right. Both legs run through the same engine,
+        so a backend that mis-hears consistently closes the loop on the
+        wrong words. `heard` is the value to check against what was said.
+        """
+        if self.echo_dir is None:
+            raise ValueError(
+                "round_trip needs echo_dir: the directory the STT engine resolves "
+                "filenames against, so vox's own output can be handed back to it."
+            )
+
+        heard = self.stt.transcribe_file(filename)
+        spoken_path = self.tts.speak(heard, out_path=str(Path(self.echo_dir) / echo_as))
+        echoed = self.stt.transcribe_file(echo_as)
+        return RoundTrip(
+            heard=heard,
+            spoken_path=spoken_path,
+            echoed=echoed,
+            input_audio_path=filename,
         )
