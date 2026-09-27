@@ -1,14 +1,19 @@
-"""Speech-to-text: the contract vox needs, backed by a running joe engine.
+"""Speech-to-text: the contract vox needs, and one client that speaks it.
 
-vox does not do audio analysis itself — that is joe's job (see joe's
-`Modules/Voice.py` and its `/api/voice/*` endpoints). This module is a thin
-HTTP client against that engine, so vox stays a seam rather than a second
-copy of joe's DSP.
+vox does no audio analysis. Transcription belongs to whatever engine is
+running, and this module is the thin HTTP client that drives it — so vox
+stays a seam rather than a second copy of somebody's DSP.
+
+Which engine is not this module's business. `HttpSTT` takes an
+`EngineContract` describing the paths and keys to use, so pointing vox at a
+different engine is a value passed in, not a class written.
 """
 
 from typing import Protocol
 
 import httpx
+
+from vox.contract import EngineContract
 
 
 class SpeechToText(Protocol):
@@ -23,13 +28,13 @@ class SpeechToText(Protocol):
         ...
 
 
-class JoeSTT:
-    """Speech-to-text delegated to a running joe engine's `/api/voice/*` endpoints.
+class HttpSTT:
+    """Speech-to-text over HTTP, against any engine matching an `EngineContract`.
 
     One `httpx.Client` is held for the life of the instance and reused by
     every call. That is not tidiness: `httpx.get`/`httpx.post` at module
     level construct a fresh `Client` per call, and constructing one costs
-    **~620 ms on this workstation** — ~240 ms of it
+    **~620 ms on the workstation this was measured on** — ~240 ms of it
     `ssl.create_default_context(cafile=certifi.where())`, paid whether or
     not the URL is `https`. A closed loop makes three of these calls, so the
     module-level form spent about two seconds per iteration doing nothing.
@@ -42,11 +47,13 @@ class JoeSTT:
 
     def __init__(
         self,
-        base_url: str = "http://127.0.0.1:8000",
+        base_url: str,
+        contract: EngineContract | None = None,
         timeout: float = 60.0,
         client: httpx.Client | None = None,
     ):
         self.base_url = base_url.rstrip("/")
+        self.contract = contract or EngineContract()
         self.timeout = timeout
         self._client = client
         self._owns_client = client is None
@@ -64,56 +71,63 @@ class JoeSTT:
             self._client.close()
             self._client = None
 
-    def __enter__(self) -> "JoeSTT":
+    def __enter__(self) -> "HttpSTT":
         return self
 
     def __exit__(self, *exc) -> None:
         self.close()
 
+    def _url(self, path: str) -> str:
+        return self.contract.url(self.base_url, path)
+
     def transcribe_file(self, filename: str) -> str:
-        """`filename` must already be visible to joe, under its Data/Audio/ or Data/Voice/."""
+        """`filename` must already be somewhere the engine can resolve it."""
         resp = self.client.post(
-            f"{self.base_url}/api/voice/transcribe",
-            params={"filename": filename},
+            self._url(self.contract.transcribe),
+            params={self.contract.filename_param: filename},
             timeout=self.timeout,
         )
         resp.raise_for_status()
-        return resp.json()["text"]
+        return resp.json()[self.contract.text_key]
 
     def listen(self, duration: float = 5.0) -> tuple[str, str]:
         resp = self.client.post(
-            f"{self.base_url}/api/voice/listen",
-            params={"duration": duration},
+            self._url(self.contract.listen),
+            params={self.contract.duration_param: duration},
             timeout=self.timeout + duration,
         )
         resp.raise_for_status()
         data = resp.json()
-        return data["text"], data["audio_path"]
+        return data[self.contract.text_key], data[self.contract.audio_path_key]
 
     def devices(self) -> dict:
-        """Audio input devices the joe engine's own machine can see.
+        """Audio input devices the engine's own machine can see.
 
-        Recording happens on joe's side, not vox's, so "is there a
+        Recording happens on the engine's side, not vox's, so "is there a
         microphone" is a question about that machine — this is how a caller
         checks before attempting `listen()`, rather than finding out from an
         opaque failure partway through.
 
-        Returns `{"devices": [...], "microphone_available": bool}`. If joe
-        can't be reached at all, `microphone_available` is False and
-        `devices` is empty rather than raising — unreachable and
-        no-microphone both mean "listen() will not work right now".
+        Returns the engine's own body. If it cannot be reached at all, the
+        availability key is False and the device list empty rather than
+        raising: unreachable and no-microphone both mean "listen() will not
+        work right now".
         """
         try:
-            resp = self.client.get(f"{self.base_url}/api/voice/devices", timeout=self.timeout)
+            resp = self.client.get(self._url(self.contract.devices), timeout=self.timeout)
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPError:
-            return {"devices": [], "microphone_available": False}
+            return {self.contract.devices_key: [], self.contract.available_key: False}
+
+    def microphone_available(self) -> bool:
+        """Read the availability flag without the caller knowing its key."""
+        return bool(self.devices().get(self.contract.available_key))
 
     def reachable(self) -> bool:
-        """Whether the joe engine answers at all, distinct from whether it has a mic."""
+        """Whether the engine answers at all, distinct from whether it has a mic."""
         try:
-            resp = self.client.get(f"{self.base_url}/api/health", timeout=self.timeout)
+            resp = self.client.get(self._url(self.contract.health), timeout=self.timeout)
             return resp.status_code == 200
         except httpx.HTTPError:
             return False

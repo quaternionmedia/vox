@@ -57,10 +57,12 @@ class VoiceSession:
         """Directory the STT engine resolves filenames against, for `round_trip`.
 
         Closing the loop means handing vox's own output back to the engine,
-        and the engine takes a *filename it can already see* rather than an
-        upload — joe has no endpoint that accepts bytes. So the two have to
-        share a filesystem, which is true of the local dev loop this is for
-        and not true of a joe on another host.
+        and `EngineContract` has the engine take a *filename it can already
+        see* rather than an upload. So the two have to share a filesystem,
+        which is true of the local development loop this is for and not true
+        of an engine on another host. An engine that accepts bytes would want
+        a different contract and a different session method; neither exists,
+        because nothing has needed one.
         """
 
     def self_report_file(self, filename: str) -> SelfReport:
@@ -91,10 +93,10 @@ class VoiceSession:
 
         `echo_as` is the name *the engine* will be asked for, resolved under
         `echo_dir` on the way out. It carries a subdirectory by default
-        because joe resolves a name against `Data/Audio` and `Data/Voice`
-        and only requires that the result stay inside one of them — so
-        `out/echo.wav` lands in a directory of vox's own making rather than
-        alongside the recordings joe captured.
+        because an engine typically resolves a name against one or two
+        directories of its own and requires only that the result stay inside
+        them — so `out/echo.wav` lands somewhere of vox's making rather than
+        alongside whatever the engine itself has recorded there.
 
         The loop closing proves the seam carried the text; it does not prove
         the transcription was right. Both legs run through the same engine,

@@ -25,6 +25,13 @@ jobs:
       - name: the recorded walkthrough is current
         run: git diff --exit-code -- walkthrough/closed-loop.md
 
+      # An editable install resolves imports against the source tree, so a
+      # subpackage the build never declared is importable in development and
+      # absent from the wheel. That shipped once here, and the suite could
+      # not have caught it: the suite runs against the editable install.
+      - name: the wheel contains the package
+        run: uv run python walkthrough/check_wheel.py
+
   mutations:
     # Every guard in this repo, broken on purpose, checked for going red.
     # Its own job because it runs the suite once per mutation and the local

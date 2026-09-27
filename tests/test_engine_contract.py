@@ -6,8 +6,8 @@ real engine, and nobody finds out until a demo. Every expectation here was
 read off joe's `api.py` and `Modules/Voice.py` at `c2d9a01` — the commit is
 named so the next reader can diff rather than re-derive.
 
-These drive the engine through `JoeSTT`, unmodified, over a real socket.
-That is the point: if `JoeSTT` needs a change to talk to the stand-in, the
+These drive the engine through `HttpSTT`, unmodified, over a real socket.
+That is the point: if the client needs a change to talk to the stand-in, the
 stand-in is not standing in.
 """
 
@@ -15,7 +15,7 @@ import httpx
 import pytest
 
 from vox.engine import EngineState, encode_wav, serve
-from vox.stt import JoeSTT
+from vox.stt import HttpSTT
 
 
 @pytest.fixture
@@ -47,8 +47,8 @@ def test_it_says_what_it_is(engine):
     """A 200 proves something is listening, not that it is the right something."""
     base_url, _, _ = engine
     body = httpx.get(f"{base_url}/api/health").json()
-    assert body["status"] == "ok", "joe answers {'status': 'ok'}; JoeSTT.reachable() needs it"
-    assert body["engine"] == "vox.engine.DeterministicEngine"
+    assert body["status"] == "ok", "reachable() reads the status; an engine answers {'status': 'ok'}"
+    assert body["engine"] == "vox.engine"
 
 
 def test_devices_matches_joes_shape(engine):
@@ -135,7 +135,7 @@ def test_joestt_needs_no_changes_to_drive_it(engine):
     """The whole point: the client that talks to joe talks to this, unmodified."""
     base_url, _, audio_dir = engine
     encode_wav("approve the deploy", audio_dir / "said.wav")
-    stt = JoeSTT(base_url=base_url)
+    stt = HttpSTT(base_url)
 
     assert stt.reachable() is True
     assert stt.devices()["microphone_available"] is True
@@ -160,6 +160,6 @@ def test_joestt_reports_an_unreachable_engine_rather_than_raising(tmp_path):
 
     # A short timeout on purpose: nothing is listening, so the only thing
     # being waited on is the wait itself.
-    stt = JoeSTT(base_url=f"http://127.0.0.1:{dead_port}", timeout=0.25)
+    stt = HttpSTT(f"http://127.0.0.1:{dead_port}", timeout=0.25)
     assert stt.reachable() is False
     assert stt.devices() == {"devices": [], "microphone_available": False}

@@ -1,10 +1,15 @@
 """vox CLI — a manual smoke test for the seam, not a production surface.
 
 Usage:
-    uv run vox doctor                     # check readiness before a live demo
-    uv run vox self-report clip.wav       # transcribe an existing file, then speak it back
-    uv run vox self-report --duration 5   # record from the mic, then speak it back
     uv run vox loop --offline             # the closed loop, no engine and no hardware
+    uv run vox doctor                     # check readiness before a live demo
+    uv run vox loop                       # the same loop against a real engine
+    uv run vox self-report clip.wav       # transcribe an existing file, then speak it back
+    uv run vox self-report --duration 5   # record from the engine's mic, then speak it back
+
+`--engine` and `--voice` each name a module in `vox.adapters`; nothing here
+is wired to a particular one, and `--url` overrides where the engine listens.
+The defaults are defaults, not requirements.
 """
 
 import contextlib
@@ -12,83 +17,129 @@ from pathlib import Path
 
 import typer
 
+from vox import adapters
 from vox.engine import EngineState, encode_wav
 from vox.engine import serve as serve_engine
 from vox.session import VoiceSession
-from vox.stt import JoeSTT
-from vox.tts import Pyttsx3TTS, RecordingTTS
+from vox.stt import HttpSTT
+from vox.tts import RecordingTTS
 
 app = typer.Typer(help="vox — the voice-interaction seam", no_args_is_help=True)
 
+ENGINE = typer.Option("joe", "--engine", help="Which adapter in vox.adapters to talk to")
+URL = typer.Option(None, "--url", help="Where the engine listens; defaults to the adapter's")
+VOICE = typer.Option("pyttsx3", "--voice", help="Which synthesizer adapter to speak with")
 
-@app.command("doctor")
-def doctor(
-    joe_url: str = typer.Option("http://127.0.0.1:8000", help="Base URL of a running joe engine"),
-):
-    """Check whether a live demo can actually run: joe reachable, a mic, local TTS.
 
-    Exists so a live self-report fails here, with a specific reason, rather
-    than partway through a recording with an opaque connection or backend
-    error.
-    """
-    ok = True
-
-    with JoeSTT(base_url=joe_url) as stt:
-        if not stt.reachable():
-            ok = False
-            typer.echo(f"[fail] joe engine: unreachable at {joe_url} -- is `joe backend` running?")
-        else:
-            typer.echo(f"[ok]   joe engine: reachable at {joe_url}")
-
-            report = stt.devices()
-            if report["microphone_available"]:
-                devices = report["devices"]
-                default = next((d for d in devices if d.get("default")), devices[0])
-                typer.echo(f"[ok]   microphone: {default['name']} (on joe's machine)")
-            else:
-                ok = False
-                typer.echo(
-                    "[fail] microphone: none found on joe's machine. "
-                    "`joe voice devices` there lists what its backend can see."
-                )
+def _resolve(engine: str, url: str | None):
+    """Look an adapter up by name. Returns (contract, base_url)."""
+    import importlib
 
     try:
-        import pyttsx3
+        module = importlib.import_module(f"vox.adapters.{engine}")
+        contract = getattr(module, engine.upper())
+    except (ImportError, AttributeError):
+        known = ", ".join(sorted(p.stem for p in Path(adapters.__file__).parent.glob("[!_]*.py")))
+        typer.echo(f"No engine adapter named {engine!r}. Known: {known}", err=True)
+        raise typer.Exit(2) from None
+    return contract, url or getattr(module, "DEFAULT_URL", "http://127.0.0.1:8000")
 
-        pyttsx3.init()
-        typer.echo("[ok]   text-to-speech: pyttsx3 initializes")
+
+def _synthesizer(voice: str):
+    """Look a synthesizer up the same way an engine is looked up.
+
+    `--voice recording` is the deterministic backend the seam owns; anything
+    else names a module in `vox.adapters` exporting a class of that name.
+    """
+    if voice == "recording":
+        return RecordingTTS()
+
+    import importlib
+
+    try:
+        module = importlib.import_module(f"vox.adapters.{voice}")
+        return getattr(module, f"{voice.capitalize()}TTS")()
+    except (ImportError, AttributeError) as exc:
+        typer.echo(f"No voice adapter named {voice!r}: {exc}", err=True)
+        raise typer.Exit(2) from None
+
+
+@app.command("doctor")
+def doctor(engine: str = ENGINE, url: str = URL, voice: str = VOICE):
+    """Check whether a live demo can run: engine reachable, a mic, local synthesis.
+
+    Exists so a live run fails here, with a specific reason, rather than
+    partway through a recording with an opaque connection or backend error.
+    """
+    contract, base_url = _resolve(engine, url)
+    ok = True
+
+    with HttpSTT(base_url, contract=contract) as stt:
+        if not stt.reachable():
+            ok = False
+            typer.echo(f"[fail] engine: nothing answering at {base_url} ({engine})")
+        else:
+            typer.echo(f"[ok]   engine: {engine} reachable at {base_url}")
+
+            report = stt.devices()
+            devices = report.get(contract.devices_key) or []
+            if report.get(contract.available_key):
+                default = next((d for d in devices if d.get("default")), devices[0])
+                typer.echo(f"[ok]   microphone: {default['name']} (on the engine's machine)")
+            else:
+                ok = False
+                typer.echo("[fail] microphone: none found on the engine's machine.")
+
+    # Synthesis is checked by synthesizing, because "the module imports" is
+    # not the thing that fails at demo time -- initialising the audio stack is.
+    try:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            _synthesizer(voice).speak("check", out_path=f"{tmp}/check.wav")
+        typer.echo(f"[ok]   text-to-speech: {voice} synthesizes")
+    except typer.Exit:
+        # `_synthesizer` refusing an unknown name is a usage error, not a
+        # broken audio stack. `typer.Exit` is not a `SystemExit`, so catching
+        # the latter here let the refusal fall through to the handler below
+        # and be reported as a synthesis failure with the wrong exit code.
+        raise
     except Exception as exc:
         ok = False
-        typer.echo(f"[fail] text-to-speech: {exc}")
+        typer.echo(f"[fail] text-to-speech: {voice}: {exc}")
 
     if not ok:
         raise typer.Exit(1)
-    typer.echo("Ready. `vox self-report --duration N` to try it live.")
+    typer.echo("Ready. `vox loop` to try it live.")
 
 
 @app.command("self-report")
 def self_report(
-    filename: str = typer.Argument(
-        None, help="Existing audio file visible to joe (under Data/Audio/ or Data/Voice/)"
-    ),
-    duration: float = typer.Option(5.0, help="Seconds to record from the mic if no filename is given"),
-    joe_url: str = typer.Option("http://127.0.0.1:8000", help="Base URL of a running joe engine"),
+    filename: str = typer.Argument(None, help="Audio file the engine can already resolve"),
+    duration: float = typer.Option(5.0, help="Seconds to record if no filename is given"),
+    engine: str = ENGINE,
+    url: str = URL,
+    voice: str = VOICE,
 ):
     """Round-trip audio -> text -> audio, either from a file or live from the mic."""
-    stt = JoeSTT(base_url=joe_url)
+    contract, base_url = _resolve(engine, url)
 
-    if filename is None:
-        report = stt.devices()
-        if not report["microphone_available"]:
+    with HttpSTT(base_url, contract=contract) as stt:
+        if filename is None and not stt.microphone_available():
             typer.echo(
                 "No microphone available. Run `vox doctor` for the specific reason "
-                "(joe unreachable, or joe's machine has no input device).",
+                "(engine unreachable, or its machine has no input device).",
                 err=True,
             )
             raise typer.Exit(1)
 
-    session = VoiceSession(stt=stt, tts=Pyttsx3TTS())
-    result = session.self_report_file(filename) if filename else session.self_report_live(duration=duration)
+        session = VoiceSession(stt=stt, tts=_synthesizer(voice))
+        result = (
+            session.self_report_file(filename)
+            if filename
+            else session.self_report_live(duration=duration)
+        )
+
     typer.echo(f"Heard:      {result.transcript}")
     typer.echo(f"Said back:  {result.output_audio_path}")
 
@@ -97,11 +148,11 @@ def self_report(
 def loop(
     say: str = typer.Option("approve the deploy", help="What the input audio says"),
     offline: bool = typer.Option(
-        False,
-        "--offline",
-        help="Run against vox's own deterministic engine instead of a joe backend",
+        False, "--offline", help="Run against vox's own deterministic engine"
     ),
-    joe_url: str = typer.Option("http://127.0.0.1:8000", help="Base URL of a running joe engine"),
+    engine: str = ENGINE,
+    url: str = URL,
+    voice: str = VOICE,
     echo_dir: str = typer.Option(
         "Data/Voice", help="Directory the engine resolves filenames against"
     ),
@@ -110,35 +161,37 @@ def loop(
 
     `--offline` is the short, deterministic form: it starts vox's own engine
     on an ephemeral port, runs the whole trip through real HTTP, and needs
-    no joe, no model download, no microphone and no speakers. That is the
+    no engine, no model download, no microphone and no speakers. That is the
     loop a test can run and a change can be checked against.
 
-    Without `--offline` the same code path runs against a real joe, which is
-    the claim the offline form cannot make: that whisper hears the words.
+    Without `--offline` the same code path runs against a real engine, which
+    is the claim the offline form cannot make: that the words were heard.
     Run both — they answer different questions.
     """
+    contract, base_url = _resolve(engine, url)
+
     with contextlib.ExitStack() as stack:
         if offline:
             state = EngineState(
-                audio_dirs=[Path(echo_dir)], microphone="deterministic engine", heard=say
+                audio_dirs=[Path(echo_dir)],
+                microphone="deterministic engine",
+                heard=say,
+                contract=contract,
             )
-            joe_url, _ = stack.enter_context(serve_engine(state))
-            tts = RecordingTTS()
+            base_url, _ = stack.enter_context(serve_engine(state))
             encode_wav(say, Path(echo_dir) / "said.wav")
-            typer.echo(f"engine:     {joe_url} (vox.engine, ephemeral port)")
+            typer.echo(f"engine:     {base_url} (vox.engine on an ephemeral port, {engine} contract)")
         else:
-            tts = Pyttsx3TTS()
-            typer.echo(f"engine:     {joe_url} (joe)")
+            typer.echo(f"engine:     {base_url} ({engine})")
 
-        stt = stack.enter_context(JoeSTT(base_url=joe_url))
+        stt = stack.enter_context(HttpSTT(base_url, contract=contract))
         # Ask what is listening before believing anything measured against it:
         # a 200 proves something is there, not that it is the right something.
-        # `handbook/async-contract.md` §4.
         if not stt.reachable():
-            typer.echo(f"[fail] nothing answering at {joe_url} -- run `vox doctor`.", err=True)
+            typer.echo(f"[fail] nothing answering at {base_url} -- run `vox doctor`.", err=True)
             raise typer.Exit(1)
 
-        session = VoiceSession(stt=stt, tts=tts, echo_dir=echo_dir)
+        session = VoiceSession(stt=stt, tts=_synthesizer("recording" if offline else voice), echo_dir=echo_dir)
         result = session.round_trip("said.wav")
 
     typer.echo(f"heard:      {result.heard!r}")
