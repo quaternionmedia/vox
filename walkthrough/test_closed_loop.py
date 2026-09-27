@@ -143,5 +143,12 @@ That run is not deterministic and is not in this suite. It answers the
 other half of the question.
 """,
         encoding="utf-8",
+        # Pinned to LF so a Windows run writes the same bytes a Linux run
+        # does. Without it, text mode translates to the platform separator,
+        # `git status` reports this artifact modified after every local test
+        # run, and a contributor reads that as the drift the file exists to
+        # make impossible. The content was never drifting; the line endings
+        # were.
+        newline="\n",
     )
     assert ARTIFACT.stat().st_size > 0

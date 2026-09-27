@@ -130,16 +130,28 @@ def main() -> int:
     rows = []
     for mutation in MUTATIONS:
         target = ROOT / mutation.path
-        original = target.read_text(encoding="utf-8")
-        if mutation.find not in original:
+        # Bytes, not text, on both sides. `write_text` translates newlines to
+        # the platform separator, so restoring a LF file on Windows put CRLF
+        # back and left four source files reported as modified by a harness
+        # whose whole job is to leave no trace. The content was identical every
+        # time, which is why a check comparing content missed it.
+        original = target.read_bytes()
+        source = original.decode("utf-8").replace("\r\n", "\n")
+        if mutation.find not in source:
             rows.append((mutation, "STALE", "the mutation no longer matches the source"))
             print(f"[STALE] {mutation.name}: text not found in {mutation.path}")
             continue
         try:
-            target.write_text(original.replace(mutation.find, mutation.replace, 1), encoding="utf-8")
+            target.write_bytes(source.replace(mutation.find, mutation.replace, 1).encode("utf-8"))
             result = _run(mutation.catches)
         finally:
-            target.write_text(original, encoding="utf-8")
+            target.write_bytes(original)
+            # Assert the restore rather than trusting it. This harness edits
+            # tracked source, so "put it back" is the one thing it must never
+            # get quietly wrong — and the previous version got it wrong for
+            # every LF file on this platform without anything noticing.
+            if target.read_bytes() != original:
+                raise SystemExit(f"{mutation.path} was not restored byte-for-byte; check `git diff`")
 
         if result.returncode == 0:
             rows.append((mutation, "INERT", "the test passed against the broken code"))
@@ -179,7 +191,10 @@ def _write_report(rows) -> None:
         caught = f"`{mutation.catches}`" if status == "caught" else f"**{status}** — {detail}"
         lines.append(f"| {mutation.name} | {caught} | {mutation.why} |")
     lines.append("")
-    REPORT.write_text("\n".join(lines), encoding="utf-8")
+    # newline pinned for the same reason as the walkthrough's artifact: text
+    # mode would translate to the platform separator, and the drift check that
+    # guards this file compares bytes.
+    REPORT.write_text("\n".join(lines), encoding="utf-8", newline="\n")
 
 
 if __name__ == "__main__":
