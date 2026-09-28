@@ -14,10 +14,21 @@ from datetime import datetime
 
 
 class Pyttsx3TTS:
-    """Synthesis via pyttsx3. Needs an audio stack; produces platform-specific bytes."""
+    """Synthesis via pyttsx3. Needs an audio stack; produces platform-specific bytes.
 
-    def __init__(self, out_dir: str = "Data/Voice/out"):
+    Speaking means being heard: by default `speak` also plays the utterance
+    through the platform voice, and returns only when the audio has finished.
+    That ordering is the polite-speaker contract — a caller that opens a
+    microphone right after `speak` returns cannot record over its own prompt,
+    because the prompt is over. `save_to_file` alone writes a WAV and plays
+    nothing, which once left a live loop recording a human who had heard
+    only silence; `playback=False` keeps that file-only behaviour for
+    artifact generation, where sound is noise.
+    """
+
+    def __init__(self, out_dir: str = "Data/Voice/out", playback: bool = True):
         self.out_dir = out_dir
+        self.playback = playback
 
     def speak(self, text: str, out_path: str | None = None) -> str:
         import pyttsx3
@@ -30,4 +41,9 @@ class Pyttsx3TTS:
         engine = pyttsx3.init()
         engine.save_to_file(text, out_path)
         engine.runAndWait()
+        if self.playback:
+            # After the file is complete, so the returned path is always a
+            # finished recording of what was said.
+            engine.say(text)
+            engine.runAndWait()
         return out_path

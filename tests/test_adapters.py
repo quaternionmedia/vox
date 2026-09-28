@@ -25,6 +25,40 @@ def test_speak_writes_to_generated_path_and_drives_engine(tmp_path):
     assert out_path.startswith(str(tmp_path))
     assert out_path.endswith(".wav")
     fake_engine.save_to_file.assert_called_once_with("hello world", out_path)
+
+
+def test_speak_is_audible_and_returns_only_after_the_audio_ends(tmp_path):
+    """The finding this pins: `save_to_file` writes a WAV and plays nothing,
+    so a live loop spoke into a file while the human sat in silence — and
+    then opened the microphone. Speaking means being heard, and the order
+    matters: the say happens after the file is complete, and `speak` returns
+    only after the final `runAndWait`, so a caller that listens next cannot
+    talk over its own prompt."""
+    fake_pyttsx3 = MagicMock()
+    fake_engine = MagicMock()
+    fake_pyttsx3.init.return_value = fake_engine
+
+    tts = Pyttsx3TTS(out_dir=str(tmp_path))
+    with patch.dict(sys.modules, {"pyttsx3": fake_pyttsx3}):
+        out_path = tts.speak("hello world")
+
+    calls = [c[0] for c in fake_engine.mock_calls]
+    assert calls == ["save_to_file", "runAndWait", "say", "runAndWait"], calls
+    fake_engine.say.assert_called_once_with("hello world")
+    assert out_path.endswith(".wav")
+
+
+def test_playback_off_keeps_the_file_only_behaviour(tmp_path):
+    """Artifact generation wants the WAV and no sound; the flag is explicit."""
+    fake_pyttsx3 = MagicMock()
+    fake_engine = MagicMock()
+    fake_pyttsx3.init.return_value = fake_engine
+
+    tts = Pyttsx3TTS(out_dir=str(tmp_path), playback=False)
+    with patch.dict(sys.modules, {"pyttsx3": fake_pyttsx3}):
+        tts.speak("hello world")
+
+    fake_engine.say.assert_not_called()
     fake_engine.runAndWait.assert_called_once()
 
 
