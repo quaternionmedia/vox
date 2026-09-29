@@ -99,6 +99,13 @@ stt = HttpSTT("http://localhost:9000", contract=MINE)
 
 A synthesizer adapter is any object with `speak(text, out_path=None) -> str`.
 
+An engine that shows the exchange to a person can name a `conversation`
+route. `HttpSTT.announce(state, text, reason=None)` then posts a dialog's own
+states to it — `speaking`, `recorded`, `gave_up`, `idle` — briefly, and never
+raises: a display that cannot be told is no reason for a question to go
+unasked. On a contract without the route, announcing does nothing.
+`vox.adapters.joe` names joe's.
+
 `tests/test_contract.py` runs the whole closed loop against a contract that
 shares no path, no parameter name and no response key with the default. That
 test is the claim: a seam that only works one way fails it.

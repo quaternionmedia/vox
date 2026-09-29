@@ -117,6 +117,9 @@ class EngineState:
     independence from any single engine is demonstrated rather than asserted."""
 
     requests: list[str] = field(default_factory=list)
+
+    announced: list[dict] = field(default_factory=list)
+    """Every body posted to the contract's `conversation` route, in order."""
     """Every path+query served, in order, so a test can assert the wire was used."""
 
 
@@ -166,6 +169,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._transcribe(query.get(contract.filename_param, [""])[0])
         elif route.path == contract.listen:
             self._listen(float(query.get(contract.duration_param, ["5.0"])[0]))
+        elif contract.conversation and route.path == contract.conversation:
+            length = int(self.headers.get("Content-Length") or 0)
+            self.state.announced.append(json.loads(self.rfile.read(length) or b"{}"))
+            self._send(200, {})
         else:
             self._send(404, {"detail": "Not Found"})
 

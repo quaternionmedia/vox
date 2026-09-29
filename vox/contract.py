@@ -55,6 +55,12 @@ class EngineContract:
     devices_key: str = "devices"
     available_key: str = "microphone_available"
 
+    conversation: str | None = None
+    """Where a dialog posts its own states -- `speaking`, `recorded`, `gave_up`,
+    `idle` -- for anything watching the exchange. None for an engine with no
+    such surface, and announcing is then a no-op: watching is optional, and
+    asking the question is not."""
+
     def url(self, base: str, path: str) -> str:
         """Join a base URL to one of this contract's paths."""
         return f"{base.rstrip('/')}{path}"

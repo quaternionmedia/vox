@@ -15,6 +15,10 @@ import httpx
 
 from vox.contract import EngineContract
 
+# Seconds an announcement may take. It feeds a display, and a question that
+# waits on one has its priorities the wrong way round.
+ANNOUNCE_TIMEOUT = 2.0
+
 
 class SpeechToText(Protocol):
     """What a speech-to-text backend must provide."""
@@ -123,6 +127,26 @@ class HttpSTT:
     def microphone_available(self) -> bool:
         """Read the availability flag without the caller knowing its key."""
         return bool(self.devices().get(self.contract.available_key))
+
+    def announce(self, state: str, text: str = "", reason: str | None = None) -> bool:
+        """Tell the engine what the dialog is doing, for anything watching.
+
+        Returns whether the engine took it. Never raises, and waits briefly: a
+        display that cannot be told is no reason for a question to go unasked.
+        """
+        if not self.contract.conversation:
+            return False
+        body = {"state": state, "text": text}
+        if reason:
+            body["reason"] = reason
+        try:
+            resp = self.client.post(
+                self._url(self.contract.conversation), json=body,
+                timeout=min(self.timeout, ANNOUNCE_TIMEOUT),
+            )
+            return resp.status_code < 400
+        except httpx.HTTPError:
+            return False
 
     def reachable(self) -> bool:
         """Whether the engine answers at all, distinct from whether it has a mic."""

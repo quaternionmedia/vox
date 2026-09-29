@@ -87,6 +87,50 @@ def test_reachable_false_when_joe_is_unreachable():
     assert _stt_with(client).reachable() is False
 
 
+def test_announce_posts_the_state_to_the_conversation_route_briefly():
+    from vox.adapters import JOE
+
+    client = MagicMock()
+    client.post.return_value = MagicMock(status_code=200)
+    stt = _stt_with(client, contract=JOE, timeout=60.0)
+
+    assert stt.announce("speaking", "I heard: banana.", reason="nomatch") is True
+    client.post.assert_called_once_with(
+        "http://127.0.0.1:8000/api/voice/conversation",
+        json={"state": "speaking", "text": "I heard: banana.", "reason": "nomatch"},
+        timeout=2.0,
+    )
+
+
+def test_announce_does_nothing_on_a_contract_without_the_route():
+    client = MagicMock()
+    stt = _stt_with(client)
+
+    assert stt.announce("speaking", "x") is False
+    client.post.assert_not_called()
+
+
+def test_announce_never_raises_when_the_engine_is_away():
+    """A display that cannot be told is no reason for the question to go unasked."""
+    from vox.adapters import JOE
+
+    client = MagicMock()
+    client.post.side_effect = httpx.ConnectError("refused")
+    stt = _stt_with(client, contract=JOE)
+
+    assert stt.announce("recorded", "approve") is False
+
+
+def test_announce_reports_a_refusal_as_not_taken():
+    from vox.adapters import JOE
+
+    client = MagicMock()
+    client.post.return_value = MagicMock(status_code=400)
+    stt = _stt_with(client, contract=JOE)
+
+    assert stt.announce("hearing") is False
+
+
 def test_one_client_serves_every_call():
     """The change that made the loop short, asserted rather than assumed.
 

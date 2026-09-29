@@ -12,6 +12,8 @@ of vox still reaches for the original spelling, they fail. That is the only
 form of this claim worth making.
 """
 
+from dataclasses import replace
+
 import httpx
 import pytest
 
@@ -33,6 +35,7 @@ ALIEN = EngineContract(
     audio_path_key="captured_to",
     devices_key="inputs",
     available_key="has_input",
+    conversation="/dialogue/state",
 )
 
 
@@ -50,6 +53,7 @@ def test_the_alien_contract_shares_nothing_with_the_default():
         "audio_path_key",
         "devices_key",
         "available_key",
+        "conversation",
     ):
         assert getattr(ALIEN, field) != getattr(default, field), field
 
@@ -134,9 +138,29 @@ def test_the_default_contract_is_not_secretly_the_alien_one(engine):
 
 
 def test_the_named_adapter_matches_the_default_today(engine):
-    """`JOE` is written out in full and currently equals the defaults.
+    """`JOE` is written out in full and equals the defaults, apart from the
+    conversation route, which the default leaves unset because not every
+    engine has one.
 
     Stated as a test rather than a comment so that the day one of them moves,
     something says so instead of the two quietly drifting.
     """
-    assert JOE == EngineContract()
+    assert replace(JOE, conversation=None) == EngineContract()
+    assert JOE.conversation == "/api/voice/conversation"
+
+
+def test_an_announcement_travels_the_contract_s_own_route(engine):
+    """On the alien contract the route is `/dialogue/state`; on the default
+    there is none, and announcing does nothing rather than guessing one."""
+    base_url, state, _, contract = engine
+
+    with HttpSTT(base_url, contract=contract) as stt:
+        took = stt.announce("speaking", "Voice check. Say approve or hold.")
+
+    if contract.conversation:
+        assert took is True
+        assert state.announced == [{"state": "speaking", "text": "Voice check. Say approve or hold."}]
+        assert any(r.startswith(contract.conversation) for r in state.requests)
+    else:
+        assert took is False
+        assert state.announced == [] and state.requests == []
