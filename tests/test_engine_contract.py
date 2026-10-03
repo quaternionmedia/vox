@@ -3,8 +3,9 @@
 A stand-in that drifts from the thing it stands in for is worse than no
 stand-in: the suite stays green while the seam stops working against the
 real engine, and nobody finds out until a demo. Every expectation here was
-read off joe's `api.py` and `Modules/Voice.py` at `c2d9a01` — the commit is
-named so the next reader can diff rather than re-derive.
+read off joe's `api.py` and `Modules/Voice.py` at `c2d9a01`, except where a
+test's docstring names a later commit, at which that one was read — the
+commit is named so the next reader can diff rather than re-derive.
 
 These drive the engine through `HttpSTT`, unmodified, over a real socket.
 That is the point: if the client needs a change to talk to the stand-in, the
@@ -144,6 +145,50 @@ def test_listen_400s_outside_joes_duration_bounds(engine, duration):
     base_url, _, _ = engine
     resp = httpx.post(f"{base_url}/api/voice/listen", params={"duration": duration})
     assert resp.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("pause", "status"),
+    [(0, 400), (99, 400), (-1, 400), (5001, 400), (99999, 400), ("abc", 422), ("1500.5", 422)],
+)
+def test_listen_refuses_a_silence_ms_joe_refuses(tmp_path, pause, status):
+    """joe: `if not 100 <= silence_ms <= 5000` answers 400 (`api.py` at
+    `2ba994d`), and its framework answers 422 to a value that is not an
+    integer before the route runs. The stand-in holds to both, or a caller
+    sending a pause the real engine refuses passes the offline suite and
+    fails at a demo.
+
+    Seen to fail before the bounds check existed: every integer case was
+    answered 200 and recorded in `pauses`. Seen to fail before the parse was
+    guarded: the two non-integer cases raised ValueError inside the handler
+    and the client saw a dropped connection (httpx.RemoteProtocolError)
+    rather than any status.
+    """
+    from vox.adapters import JOE
+
+    state = EngineState(
+        audio_dirs=[tmp_path], microphone="Deterministic Input (vox)", heard="go", contract=JOE
+    )
+    with serve(state) as (base_url, state):
+        resp = httpx.post(f"{base_url}/api/voice/listen", params={"duration": 2, "silence_ms": pause})
+
+    assert resp.status_code == status
+    assert state.pauses == [], "a refused pause never arrived at a recording"
+
+
+def test_listen_bounds_only_the_pause_its_contract_names(engine):
+    """The bound is the stood-in engine's, so it applies only under that
+    engine's spelling. On the default contract, which names no pause
+    parameter, the same key is an alien query parameter the engine never
+    reads: answered 200, nothing recorded, exactly as before the bound existed.
+
+    Seen to fail by reading the bound off a fixed `silence_ms` key rather
+    than `contract.pause_param`: the default engine answered 400.
+    """
+    base_url, state, _ = engine
+    resp = httpx.post(f"{base_url}/api/voice/listen", params={"duration": 2, "silence_ms": 0})
+    assert resp.status_code == 200
+    assert state.pauses == [None]
 
 
 def test_listen_503s_without_a_microphone(tmp_path):

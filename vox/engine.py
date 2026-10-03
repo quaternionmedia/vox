@@ -123,10 +123,11 @@ class EngineState:
     """Every body posted to the contract's `conversation` route, in order."""
 
     pauses: list[int | None] = field(default_factory=list)
-    """What each `listen` carried under the contract's `pause_param`, in order,
-    None when it carried nothing or the contract names no such parameter.
-    The engine has no speaker to wait for, so the value changes nothing it
-    does; recording it is how a test sees it arrived."""
+    """What each accepted `listen` carried under the contract's `pause_param`,
+    in order, None when it carried nothing or the contract names no such
+    parameter. A request refused for its value records nothing. The engine
+    has no speaker to wait for, so the value changes nothing it does;
+    recording it is how a test sees it arrived."""
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -174,9 +175,20 @@ class _Handler(BaseHTTPRequestHandler):
         if route.path == contract.transcribe:
             self._transcribe(query.get(contract.filename_param, [""])[0])
         elif route.path == contract.listen:
+            duration = query.get(contract.duration_param, ["5.0"])[0]
             pause = query.get(contract.pause_param, [None])[0] if contract.pause_param else None
-            self.state.pauses.append(None if pause is None else int(pause))
-            self._listen(float(query.get(contract.duration_param, ["5.0"])[0]))
+            try:
+                duration = float(duration)
+                pause = None if pause is None else int(pause)
+            except ValueError:
+                # The stood-in engine's framework refuses a value that does not
+                # parse before the route runs, with a 422. A handler that let
+                # the exception escape would drop the connection instead, a
+                # shape no engine produces and no client is written for.
+                names = " and ".join(p for p in (contract.duration_param, contract.pause_param) if p)
+                self._send(422, {"detail": f"{names} must be numeric"})
+                return
+            self._listen(duration, pause)
         elif contract.conversation and route.path == contract.conversation:
             length = int(self.headers.get("Content-Length") or 0)
             self.state.announced.append(json.loads(self.rfile.read(length) or b"{}"))
@@ -195,11 +207,23 @@ class _Handler(BaseHTTPRequestHandler):
         dirs = " or ".join(str(d) for d in self.state.audio_dirs)
         self._send(404, {"detail": f"No such file under {dirs}: {filename}"})
 
-    def _listen(self, duration: float) -> None:
+    def _listen(self, duration: float, pause: int | None) -> None:
         contract = self.state.contract
         if not 0 < duration <= 60:
             self._send(400, {"detail": "duration must be between 0 and 60 seconds"})
-        elif self.state.microphone is None:
+            return
+        if pause is not None and not 100 <= pause <= 5000:
+            # The stood-in engine's bound on its pause parameter, held to here
+            # for the same reason as the duration bound above: a caller that
+            # sends a value the real engine refuses has to fail the offline
+            # suite too. `tests/test_engine_contract.py` names the engine and
+            # the commit the bounds were read at.
+            self._send(400, {"detail": f"{contract.pause_param} must be between 100 and 5000"})
+            return
+        # Recorded once the request is one the engine would act on, so a test
+        # reading `pauses` sees what was accepted and never what was refused.
+        self.state.pauses.append(pause)
+        if self.state.microphone is None:
             self._send(503, {"detail": "No microphone found on the engine's machine."})
         else:
             # A real engine records and then transcribes, so the WAV exists on

@@ -154,6 +154,14 @@ MUTATIONS = [
         why="An engine with no such parameter would be sent one under a name it never agreed to, and the seam would have hardcoded a spelling again.",
     ),
     Mutation(
+        name="the engine accepts a pause the engine it stands in for refuses",
+        path="vox/engine.py",
+        find="        if pause is not None and not 100 <= pause <= 5000:",
+        replace="        if False:",
+        catches="tests/test_engine_contract.py::test_listen_refuses_a_silence_ms_joe_refuses",
+        why="A caller sending a pause outside the real engine's bounds would pass the offline suite and be answered 400 at the demo, which is the drift the stand-in exists to prevent.",
+    ),
+    Mutation(
         name="every call builds its own client again",
         path="vox/stt.py",
         find="        if self._client is None:\n            self._client = httpx.Client(timeout=self.timeout)\n        return self._client",
