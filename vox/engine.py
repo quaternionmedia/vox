@@ -123,9 +123,10 @@ class EngineState:
     """Every body posted to the contract's `conversation` route, in order."""
 
     pauses: list[int | None] = field(default_factory=list)
-    """What each accepted `listen` carried under the contract's `pause_param`,
-    in order, None when it carried nothing or the contract names no such
-    parameter. A request refused for its value records nothing. The engine
+    """What each `listen` not refused for its value carried under the
+    contract's `pause_param`, in order, None when it carried nothing or the
+    contract names no such parameter. A request refused for its value records
+    nothing; one refused later for a missing microphone is recorded. The engine
     has no speaker to wait for, so the value changes nothing it does;
     recording it is how a test sees it arrived."""
 

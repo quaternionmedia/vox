@@ -199,10 +199,11 @@ def test_listen_accepts_the_pauses_at_the_edges_of_joes_bound(tmp_path):
 
 
 def test_listen_bounds_only_the_pause_its_contract_names(engine):
-    """The bound is the stood-in engine's, so it applies only under that
-    engine's spelling. On the default contract, which names no pause
-    parameter, the same key is an alien query parameter the engine never
-    reads: answered 200, nothing recorded, exactly as before the bound existed.
+    """The bound is the stood-in engine's, and it applies whenever a contract
+    names a pause parameter, under that contract's own spelling. On the
+    default contract, which names no pause parameter, the same key is an
+    alien query parameter the engine never reads: answered 200, nothing
+    recorded, exactly as before the bound existed.
 
     Seen to fail by reading the bound off a fixed `silence_ms` key rather
     than `contract.pause_param`: the default engine answered 400.
