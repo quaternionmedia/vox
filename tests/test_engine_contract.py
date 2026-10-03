@@ -176,6 +176,28 @@ def test_listen_refuses_a_silence_ms_joe_refuses(tmp_path, pause, status):
     assert state.pauses == [], "a refused pause never arrived at a recording"
 
 
+def test_listen_accepts_the_pauses_at_the_edges_of_joes_bound(tmp_path):
+    """joe's bound is inclusive, `100 <= silence_ms <= 5000` (`api.py` at
+    `2ba994d`), so both edges are accepted and recorded. The refusal cases
+    alone leave the edges unpinned: a stand-in with an exclusive bound
+    refuses two values the real engine accepts and passes every refusal case.
+
+    Seen to fail by narrowing the engine's check to `100 < pause < 5000`:
+    the first edge was answered 400 and the client raised on it
+    (httpx.HTTPStatusError) before the second was sent.
+    """
+    from vox.adapters import JOE
+
+    state = EngineState(
+        audio_dirs=[tmp_path], microphone="Deterministic Input (vox)", heard="go", contract=JOE
+    )
+    with serve(state) as (base_url, state), HttpSTT(base_url, contract=JOE) as stt:
+        stt.listen(duration=2, pause_ms=100)
+        stt.listen(duration=2, pause_ms=5000)
+
+    assert state.pauses == [100, 5000]
+
+
 def test_listen_bounds_only_the_pause_its_contract_names(engine):
     """The bound is the stood-in engine's, so it applies only under that
     engine's spelling. On the default contract, which names no pause

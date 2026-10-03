@@ -162,6 +162,14 @@ MUTATIONS = [
         why="A caller sending a pause outside the real engine's bounds would pass the offline suite and be answered 400 at the demo, which is the drift the stand-in exists to prevent.",
     ),
     Mutation(
+        name="the engine refuses the pauses at the edges of the bound it stands in for",
+        path="vox/engine.py",
+        find="        if pause is not None and not 100 <= pause <= 5000:",
+        replace="        if pause is not None and not 100 < pause < 5000:",
+        catches="tests/test_engine_contract.py::test_listen_accepts_the_pauses_at_the_edges_of_joes_bound",
+        why="Every refusal case still passes against an exclusive bound; only a test sending the edges themselves tells an inclusive bound from one off by one.",
+    ),
+    Mutation(
         name="every call builds its own client again",
         path="vox/stt.py",
         find="        if self._client is None:\n            self._client = httpx.Client(timeout=self.timeout)\n        return self._client",
