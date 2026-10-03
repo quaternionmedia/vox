@@ -41,7 +41,7 @@ class EngineContract:
     """Transcribes a file the engine can already see, named by `filename_param`."""
 
     listen: str = "/api/voice/listen"
-    """Records for `duration_param` seconds and transcribes what it heard."""
+    """Records up to `duration_param` seconds and transcribes what it heard."""
 
     filename_param: str = "filename"
     duration_param: str = "duration"
