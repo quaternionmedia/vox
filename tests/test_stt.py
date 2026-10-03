@@ -53,6 +53,66 @@ def test_listen_posts_duration_and_returns_text_and_path():
     )
 
 
+def test_listen_sends_the_pause_when_the_contract_names_it_and_a_value_is_given():
+    """`pause_ms` travels under the contract's own spelling of the parameter.
+
+    Seen to fail by dropping the `pause_ms` branch from `HttpSTT.listen`:
+    the request then carried `duration` alone and the assertion on `params`
+    went red. `walkthrough/mutate.py` keeps that mutation.
+    """
+    from vox.adapters import JOE
+
+    client = MagicMock()
+    client.post.return_value = _fake_response({"text": "go", "audio_path": "cap.wav"})
+    stt = _stt_with(client, contract=JOE, timeout=10.0)
+
+    assert stt.listen(duration=3.0, pause_ms=1500) == ("go", "cap.wav")
+    client.post.assert_called_once_with(
+        "http://127.0.0.1:8000/api/voice/listen",
+        params={"duration": 3.0, "silence_ms": 1500},
+        timeout=13.0,
+    )
+
+
+def test_listen_sends_no_pause_on_a_contract_without_one():
+    """An engine with no such parameter is never sent one, whatever the caller asked.
+
+    Seen to fail by sending `{"pause_ms": pause_ms}` whenever a value was
+    given, regardless of the contract: a key the contract never named
+    appeared in `params`. `walkthrough/mutate.py` keeps that mutation too.
+    """
+    client = MagicMock()
+    client.post.return_value = _fake_response({"text": "go", "audio_path": "cap.wav"})
+    stt = _stt_with(client, timeout=10.0)
+
+    stt.listen(duration=3.0, pause_ms=1500)
+    client.post.assert_called_once_with(
+        "http://127.0.0.1:8000/api/voice/listen",
+        params={"duration": 3.0},
+        timeout=13.0,
+    )
+
+
+def test_listen_sends_no_pause_when_none_was_given():
+    """The engine's own default stands when the caller states no preference.
+
+    Seen to fail by sending the parameter unconditionally on a contract that
+    names it, with `None` as its value: `silence_ms` appeared in `params`.
+    """
+    from vox.adapters import JOE
+
+    client = MagicMock()
+    client.post.return_value = _fake_response({"text": "go", "audio_path": "cap.wav"})
+    stt = _stt_with(client, contract=JOE, timeout=10.0)
+
+    stt.listen(duration=3.0)
+    client.post.assert_called_once_with(
+        "http://127.0.0.1:8000/api/voice/listen",
+        params={"duration": 3.0},
+        timeout=13.0,
+    )
+
+
 def test_devices_returns_the_engines_report():
     payload = {
         "devices": [{"index": 1, "name": "Mic", "channels": 2, "default": True}],

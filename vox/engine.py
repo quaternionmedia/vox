@@ -117,10 +117,16 @@ class EngineState:
     independence from any single engine is demonstrated rather than asserted."""
 
     requests: list[str] = field(default_factory=list)
+    """Every path+query served, in order, so a test can assert the wire was used."""
 
     announced: list[dict] = field(default_factory=list)
     """Every body posted to the contract's `conversation` route, in order."""
-    """Every path+query served, in order, so a test can assert the wire was used."""
+
+    pauses: list[int | None] = field(default_factory=list)
+    """What each `listen` carried under the contract's `pause_param`, in order,
+    None when it carried nothing or the contract names no such parameter.
+    The engine has no speaker to wait for, so the value changes nothing it
+    does; recording it is how a test sees it arrived."""
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -168,6 +174,8 @@ class _Handler(BaseHTTPRequestHandler):
         if route.path == contract.transcribe:
             self._transcribe(query.get(contract.filename_param, [""])[0])
         elif route.path == contract.listen:
+            pause = query.get(contract.pause_param, [None])[0] if contract.pause_param else None
+            self.state.pauses.append(None if pause is None else int(pause))
             self._listen(float(query.get(contract.duration_param, ["5.0"])[0]))
         elif contract.conversation and route.path == contract.conversation:
             length = int(self.headers.get("Content-Length") or 0)

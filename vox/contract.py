@@ -46,6 +46,14 @@ class EngineContract:
     filename_param: str = "filename"
     duration_param: str = "duration"
 
+    pause_param: str | None = None
+    """The parameter naming how long a pause ends the take, in milliseconds.
+    `duration_param` is then the cap and the recording stops this long after
+    the speaker does, so a closed-choice answer takes the engine's short
+    default and a sentence-length instruction, with pauses mid-thought, asks
+    for a longer one. None for an engine that records a fixed window and has
+    no such thing; `listen(pause_ms=...)` then sends nothing."""
+
     text_key: str = "text"
     """Where the transcript sits in a transcribe or listen response."""
 

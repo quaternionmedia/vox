@@ -115,6 +115,29 @@ def test_listen_returns_joes_four_keys_and_a_real_file(engine):
     assert decode_wav(body["audio_path"]) == "approve the deploy"
 
 
+def test_listen_takes_joes_silence_ms_and_reports_it(tmp_path):
+    """joe's listen route ends a take `silence_ms` after the speaker stops
+    (`api.py` at `2ba994d`). The stand-in has no speaker to wait for, so it
+    accepts the parameter, ignores it, and writes what it saw to `pauses`,
+    which is how a test sees the value arrived on the wire.
+
+    Seen to fail by having `_listen` append a fixed None rather than the
+    parsed value: `pauses` read `[None]` where 1200 had been sent.
+    """
+    from vox.adapters import JOE
+
+    state = EngineState(
+        audio_dirs=[tmp_path], microphone="Deterministic Input (vox)", heard="go", contract=JOE
+    )
+    with serve(state) as (base_url, state), HttpSTT(base_url, contract=JOE) as stt:
+        stt.listen(duration=2, pause_ms=1200)
+        stt.listen(duration=2)
+
+    assert state.pauses == [1200, None]
+    assert state.requests[0].endswith("?duration=2&silence_ms=1200")
+    assert state.requests[1].endswith("?duration=2")
+
+
 @pytest.mark.parametrize("duration", [0, -1, 61, 1000])
 def test_listen_400s_outside_joes_duration_bounds(engine, duration):
     """joe: `if not 0 < duration <= 60`."""
