@@ -78,9 +78,13 @@ class VoiceSession:
             output_audio_path=output_path,
         )
 
-    def self_report_live(self, duration: float = 5.0) -> SelfReport:
-        """Record from the mic (via the STT backend), then speak the transcript back."""
-        transcript, input_path = self.stt.listen(duration=duration)
+    def self_report_live(self, duration: float = 5.0, pause_ms: int | None = None) -> SelfReport:
+        """Record from the mic (via the STT backend), then speak the transcript back.
+
+        `pause_ms` goes to the backend as given; whether and how it reaches
+        the engine is the backend's contract to decide.
+        """
+        transcript, input_path = self.stt.listen(duration=duration, pause_ms=pause_ms)
         output_path = self.tts.speak(transcript)
         return SelfReport(
             transcript=transcript,

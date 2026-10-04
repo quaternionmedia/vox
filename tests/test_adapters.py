@@ -113,3 +113,14 @@ def test_an_adapter_is_reachable_when_asked_for():
     from vox.adapters import JOE
 
     assert JOE.transcribe.startswith("/")
+
+
+def test_the_joe_adapter_names_the_pause_parameter():
+    """joe ends a take `silence_ms` after the speaker stops; the adapter is
+    where that spelling lives, and nowhere above it.
+
+    Seen to fail by leaving `pause_param` off `JOE`: it read None.
+    """
+    from vox.adapters import JOE
+
+    assert JOE.pause_param == "silence_ms"

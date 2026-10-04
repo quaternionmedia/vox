@@ -27,8 +27,12 @@ class SpeechToText(Protocol):
         """Transcribe an audio file the backend can already see. Returns the text."""
         ...
 
-    def listen(self, duration: float = 5.0) -> tuple[str, str]:
-        """Capture `duration` seconds live and transcribe it. Returns (text, audio_path)."""
+    def listen(self, duration: float = 5.0, *, pause_ms: int | None = None) -> tuple[str, str]:
+        """Capture up to `duration` seconds live and transcribe it. Returns (text, audio_path).
+
+        `pause_ms` is how long a pause ends the take early, for a backend
+        that stops when the speaker does. None leaves the backend's default.
+        """
         ...
 
 
@@ -94,10 +98,18 @@ class HttpSTT:
         resp.raise_for_status()
         return resp.json()[self.contract.text_key]
 
-    def listen(self, duration: float = 5.0) -> tuple[str, str]:
+    def listen(self, duration: float = 5.0, *, pause_ms: int | None = None) -> tuple[str, str]:
+        """`pause_ms` is sent under the contract's `pause_param`, and only when
+        both the contract names one and a value was given: an engine that
+        records a fixed window is never handed a parameter it has no spelling
+        for, and an engine that has one keeps its own default when the caller
+        states no preference."""
+        params: dict = {self.contract.duration_param: duration}
+        if self.contract.pause_param and pause_ms is not None:
+            params[self.contract.pause_param] = pause_ms
         resp = self.client.post(
             self._url(self.contract.listen),
-            params={self.contract.duration_param: duration},
+            params=params,
             timeout=self.timeout + duration,
         )
         resp.raise_for_status()
