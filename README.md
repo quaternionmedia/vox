@@ -119,6 +119,15 @@ hint biases and never constrains. `announce(..., options=[...])` puts the same
 words in a `speaking` state, in the order the question says them, so a display
 can offer each as a control. `vox.adapters.joe` names joe's.
 
+The platform voice (`vox.adapters.pyttsx3`) is heard on the platform's default
+output unless told otherwise: `Pyttsx3TTS(output_device=...)` or
+`VOX_OUTPUT_DEVICE` names another by a fragment of its name, and a fragment
+matching none or several is refused. `vox outputs` lists the names and `vox say
+"testing" --output <fragment>` says something on one, to find the output a
+person actually hears. On Windows the adapter drives SAPI directly -- writing
+the sentence to a WAV, then playing that file to the end -- because pyttsx3's
+own playback returned without playing there.
+
 `tests/test_contract.py` runs the whole closed loop against a contract that
 shares no path, no parameter name and no response key with the default. That
 test is the claim: a seam that only works one way fails it.

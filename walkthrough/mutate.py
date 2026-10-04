@@ -178,6 +178,22 @@ MUTATIONS = [
         why="A display could no longer offer the answers as controls, so a person who cannot be heard has no other way to answer.",
     ),
     Mutation(
+        name="the SAPI path plays with pyttsx3's say again",
+        path="vox/adapters/pyttsx3.py",
+        find="        if _sapi():\n            _sapi_speak(text, out_path, self.playback, self.output_device)\n            return out_path\n",
+        replace="",
+        catches="tests/test_adapters.py::test_on_sapi_the_file_is_written_then_played_synchronously",
+        why="On the machine it was measured on, pyttsx3's say returned without playing: every sentence went into a file and the person heard nothing.",
+    ),
+    Mutation(
+        name="a named output that matches several is guessed",
+        path="vox/adapters/pyttsx3.py",
+        find="    if len(matches) != 1:",
+        replace="    if not matches:",
+        catches="tests/test_adapters.py::test_on_sapi_an_output_matching_several_or_none_is_refused",
+        why="A fragment naming several outputs would play to whichever came first, which can be a jack nobody hears.",
+    ),
+    Mutation(
         name="the engine accepts a pause the engine it stands in for refuses",
         path="vox/engine.py",
         find="        if pause is not None and not 100 <= pause <= 5000:",
