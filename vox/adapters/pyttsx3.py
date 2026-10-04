@@ -15,6 +15,13 @@ from datetime import datetime
 
 # SAPI's file-stream modes.
 SSFM_OPEN_FOR_READ, SSFM_CREATE_FOR_WRITE = 0, 3
+# SAPI's speak flags: return at once, and drop whatever is still playing.
+SVSF_ASYNC, SVSF_PURGE = 1, 2
+# How often a sentence that may be interrupted asks whether it has been, and
+# how long a stop may take to settle, in milliseconds. Measured on a virtual
+# cable: the audio ended within one 100 ms block of the stop.
+UNTIL_POLL_MS = 100
+STOP_WAIT_MS = 2000
 
 
 def _sapi() -> bool:
@@ -53,8 +60,18 @@ def _output_token(voice, fragment: str):
     return matches[0]
 
 
-def _sapi_speak(text: str, out_path: str, playback: bool, output_device: str | None) -> None:
-    """Write `text` to `out_path` with SAPI, then play that file to the end."""
+def _asked(until) -> bool:
+    """Whether `until()` says to stop. A check that fails never cuts a sentence."""
+    try:
+        return bool(until())
+    except Exception:  # noqa: BLE001 -- a check that fails never cuts a sentence
+        return False
+
+
+def _sapi_speak(text: str, out_path: str, playback: bool, output_device: str | None,
+                until=None) -> bool:
+    """Write `text` to `out_path` with SAPI, then play that file to the end, or
+    until `until()` is true. Returns whether it was cut short."""
     import comtypes.client
 
     writer = comtypes.client.CreateObject("SAPI.SpVoice")
@@ -66,14 +83,23 @@ def _sapi_speak(text: str, out_path: str, playback: bool, output_device: str | N
     finally:
         stream.Close()
     if not playback:
-        return
+        return False
     player = comtypes.client.CreateObject("SAPI.SpVoice")
     if output_device:
         player.AudioOutput = _output_token(player, output_device)
     reader = comtypes.client.CreateObject("SAPI.SpFileStream")
     reader.Open(out_path, SSFM_OPEN_FOR_READ)
     try:
-        player.SpeakStream(reader, 0)  # synchronous: returns when the audio ends
+        if until is None:
+            player.SpeakStream(reader, 0)  # synchronous: returns when the audio ends
+            return False
+        player.SpeakStream(reader, SVSF_ASYNC)
+        while not player.WaitUntilDone(UNTIL_POLL_MS):
+            if _asked(until):
+                player.Speak("", SVSF_ASYNC | SVSF_PURGE)
+                player.WaitUntilDone(STOP_WAIT_MS)
+                return True
+        return False
     finally:
         reader.Close()
 
@@ -89,6 +115,13 @@ class Pyttsx3TTS:
     nothing, which once left a live loop recording a human who had heard
     only silence; `playback=False` keeps that file-only behaviour for
     artifact generation, where sound is noise.
+
+    **A question can be answered over.** With `until`, a callable, the voice
+    stops as soon as it returns true -- asked every `UNTIL_POLL_MS` -- and
+    `speak` returns once it has, so a person who answers before the question
+    ends is not talked over; `cut` says whether the last sentence was. Only
+    on SAPI: pyttsx3's own loop has no stop that was seen to work, and plays
+    to the end.
     """
 
     def __init__(self, out_dir: str = "Data/Voice/out", playback: bool = True,
@@ -99,15 +132,17 @@ class Pyttsx3TTS:
         # platform default when unset. `VOX_OUTPUT_DEVICE` names it for a
         # process that cannot be handed an argument.
         self.output_device = output_device or os.environ.get("VOX_OUTPUT_DEVICE") or None
+        self.cut = False
 
-    def speak(self, text: str, out_path: str | None = None) -> str:
+    def speak(self, text: str, out_path: str | None = None, until=None) -> str:
         os.makedirs(self.out_dir, exist_ok=True)
         if out_path is None:
             stamp = datetime.now().strftime("%m-%d-%y_%H-%M-%S")
             out_path = os.path.join(self.out_dir, f"speak_{stamp}.wav")
 
+        self.cut = False
         if _sapi():
-            _sapi_speak(text, out_path, self.playback, self.output_device)
+            self.cut = _sapi_speak(text, out_path, self.playback, self.output_device, until)
             return out_path
         import pyttsx3
 

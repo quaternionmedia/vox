@@ -39,6 +39,10 @@ ALIEN = EngineContract(
     pause_param="hush",
     hint_param="expect",
     confidence_key="sureness",
+    watch="/v2/stt/early",
+    unwatch="/v2/stt/early/close",
+    control="/v2/turn",
+    interrupted_key="cut_in",
 )
 
 
@@ -60,6 +64,10 @@ def test_the_alien_contract_shares_nothing_with_the_default():
         "pause_param",
         "hint_param",
         "confidence_key",
+        "watch",
+        "unwatch",
+        "control",
+        "interrupted_key",
     ):
         assert getattr(ALIEN, field) != getattr(default, field), field
 
@@ -206,7 +214,7 @@ def test_the_named_adapter_matches_the_default_today(engine):
     something says so instead of the two quietly drifting.
     """
     assert replace(JOE, conversation=None, pause_param=None, hint_param=None,
-                   confidence_key=None) == EngineContract()
+                   confidence_key=None, watch=None, unwatch=None, control=None) == EngineContract()
     assert JOE.conversation == "/api/voice/conversation"
     assert JOE.pause_param == "silence_ms"
     assert JOE.hint_param == "hint"
@@ -227,3 +235,35 @@ def test_an_announcement_travels_the_contract_s_own_route(engine):
     else:
         assert took is False
         assert state.announced == [] and state.requests == []
+
+
+def test_a_watch_travels_the_contract_s_own_route_or_not_at_all(engine):
+    """With the listen's parameters in the contract's spelling; on a contract
+    without the route, nothing is sent."""
+    base_url, state, _, contract = engine
+
+    with HttpSTT(base_url, contract=contract) as stt:
+        opened = stt.watch(3, pause_ms=600, hint=["approve", "hold"])
+        closed = stt.unwatch()
+
+    if contract.watch:
+        assert opened is True and closed is True
+        assert state.watches == [{contract.duration_param: "3", contract.pause_param: "600",
+                                  contract.hint_param: "approve, hold"}, None]
+    else:
+        assert opened is False and closed is False
+        assert state.watches == [] and state.requests == []
+
+
+def test_an_interruption_is_read_in_this_contract_s_spelling_or_not_at_all(engine):
+    """Seen to fail by reading `interrupted` rather than the contract's key:
+    the alien contract was never interrupted."""
+    base_url, state, _, contract = engine
+
+    with HttpSTT(base_url, contract=contract) as stt:
+        state.interrupted = True
+        cut = stt.interrupted()
+        state.interrupted = False
+        uncut = stt.interrupted()
+
+    assert cut is bool(contract.control) and uncut is False

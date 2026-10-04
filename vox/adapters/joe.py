@@ -5,8 +5,9 @@ with whisper behind `/api/voice/*` and records from its own machine's
 microphone. This module is the whole of vox's knowledge of it.
 
 The values here are identical to `EngineContract()`'s defaults, apart from
-`conversation`, `pause_param`, `hint_param` and `confidence_key`, which the
-default leaves unset because not every engine has them. The defaults were taken from this engine when there
+`conversation`, `pause_param`, `hint_param`, `confidence_key`, `watch`,
+`unwatch` and `control`, which the default leaves unset because not every
+engine has them. The defaults were taken from this engine when there
 was only one. That is worth stating rather than leaving as a coincidence: if
 joe's routes move, this module changes and the defaults do not, and the two
 stop being the same thing. Being written out in full is what makes that
@@ -35,12 +36,18 @@ JOE = EngineContract(
     pause_param="silence_ms",
     hint_param="hint",
     confidence_key="confidence",
+    watch="/api/voice/watch",
+    unwatch="/api/voice/unwatch",
+    control="/api/voice/control",
+    interrupted_key="interrupted",
 )
 """joe's surface. Its files resolve under that engine's `Data/Audio` and
 `Data/Voice`, so a filename handed to `transcribe` is relative to those.
 `listen` ends a take `silence_ms` after the speaker stops, within the bounds
 its route states, and `duration` is the cap; `hint` is the words an answer is
-expected to be, handed to its transcriber as a prompt."""
+expected to be, handed to its transcriber as a prompt. `watch` opens a take
+while a question is still being asked, and `control` reports `interrupted`
+once the person has answered by key, held the talk key, or spoken over it."""
 
 DEFAULT_URL = "http://127.0.0.1:8000"
 """Where `joe backend` listens unless told otherwise. A default, not a promise —
