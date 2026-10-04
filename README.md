@@ -119,6 +119,11 @@ hint biases and never constrains. `announce(..., options=[...])` puts the same
 words in a `speaking` state, in the order the question says them, so a display
 can offer each as a control. `vox.adapters.joe` names joe's.
 
+An engine that weighs its transcripts names, as `confidence_key`, where a
+listen response says how sure it is, from 0 to 1; `HttpSTT.last_confidence`
+then holds it after each `listen`, and None when the contract names no such
+key or the engine reported none. `vox.adapters.joe` names joe's.
+
 The platform voice (`vox.adapters.pyttsx3`) is heard on the platform's default
 output unless told otherwise: `Pyttsx3TTS(output_device=...)` or
 `VOX_OUTPUT_DEVICE` names another by a fragment of its name, and a fragment

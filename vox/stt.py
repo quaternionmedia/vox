@@ -69,6 +69,9 @@ class HttpSTT:
         self.timeout = timeout
         self._client = client
         self._owns_client = client is None
+        # How sure the engine was of the last `listen`'s transcript, 0 to 1, or
+        # None when its contract names no confidence or it reported none.
+        self.last_confidence: float | None = None
 
     @property
     def client(self) -> httpx.Client:
@@ -122,6 +125,8 @@ class HttpSTT:
         )
         resp.raise_for_status()
         data = resp.json()
+        reported = data.get(self.contract.confidence_key) if self.contract.confidence_key else None
+        self.last_confidence = float(reported) if isinstance(reported, (int, float)) else None
         return data[self.contract.text_key], data[self.contract.audio_path_key]
 
     def devices(self) -> dict:
