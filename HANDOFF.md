@@ -4,9 +4,9 @@ Where vox sits in a three-repository voice loop, for someone picking it up
 cold. `README.md` is the surface; this is the part that is not visible from
 inside this clone.
 
-**Stamped 2026-09-27**, at `vox` `main` `d54a7f7`, `joe` `main` `6e1ad16`,
-`qmcp` `main` `d834916` with `feat/voice-interaction` open. Every figure was
-true at those commits and nowhere else.
+**Stamped 2026-10-03**, at `vox` `main` `d94fe6b`, `joe` `main` `2ba994d`,
+`qmcp` `main` `ed01fc0`. Every figure was true at those commits and nowhere
+else.
 
 ## The shape
 
@@ -22,9 +22,12 @@ audio --> a speech engine (STT over HTTP) --> transcript --> vox TTS --> audio
 - **A speech engine** does the transcription. `vox.adapters.joe` is the
   contract for the one this was built against; it transcribes with whisper
   and records from its own machine's microphone.
-- **qmcp** is a consumer. It vendors vox as a submodule at `./vox` and uses
-  it to answer its human-in-the-loop queue by speaking, as
-  `qmcp human voice`.
+- **qmcp** is a consumer. It vendors vox as a submodule at `vendor/vox` and
+  uses it to answer its human-in-the-loop queue by speaking, as
+  `qmcp human voice`. The submodule is not at qmcp's root: an editable
+  install puts that root on `sys.path`, and a directory there named `vox`
+  with no `__init__.py` resolves `import vox` to an empty namespace package
+  in place of this one.
 
 Nothing under `vox/` imports `vox.adapters`, and a test asserts it in a
 subprocess. A product is named there and nowhere else.
@@ -68,9 +71,12 @@ loop through transcription needs `pyttsx3` or another real voice.
 - **The engine's default input is often not a microphone.** On the
   workstation this was built on it is a capture card, and the machine lists
   twenty inputs across four host APIs with the same microphone appearing
-  four times under a byte-identical name. `joe voice level --every` records
-  briefly from each and reports the level; speak while it runs and set
-  `JOE_INPUT_DEVICE` to the one that moves.
+  four times under a byte-identical name. `uv run joe voice setup`, in the
+  engine's own checkout, tries every input while you keep talking, picks by
+  loudness, proves the pick by transcribing a sentence, and saves it in the
+  engine's checkout, where a running engine reads it on its next recording.
+  `JOE_INPUT_DEVICE`, where set in the engine's environment, still
+  overrides it.
 - **An engine refuses a filename containing a separator.** `round_trip`'s
   echo name is bare for that reason; a name with a `/` in it is how a path
   traversal gets in.
