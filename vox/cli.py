@@ -71,6 +71,35 @@ def _synthesizer(voice: str):
         raise typer.Exit(2) from None
 
 
+@app.command("outputs")
+def list_outputs():
+    """The audio outputs the platform voice can play to, by name.
+
+    Pass a fragment of one to `vox say --output`, or set `VOX_OUTPUT_DEVICE`,
+    when the default output is not the one a person hears.
+    """
+    from vox.adapters.pyttsx3 import outputs
+
+    names = outputs()
+    if not names:
+        typer.echo("The platform default output is used; this platform does not list them.")
+        return
+    for name in names:
+        typer.echo(name)
+
+
+@app.command("say")
+def say(text: str, output: str = typer.Option(None, help="A fragment of the output's name; default: VOX_OUTPUT_DEVICE, else the platform default")):
+    """Say `text` aloud through the platform voice, to hear which output carries it."""
+    from vox.adapters.pyttsx3 import Pyttsx3TTS
+
+    try:
+        Pyttsx3TTS(output_device=output).speak(text)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from None
+
+
 @app.command("doctor")
 def doctor(engine: str = ENGINE, url: str = URL, voice: str = VOICE):
     """Check whether a live demo can run: engine reachable, a mic, local synthesis.
