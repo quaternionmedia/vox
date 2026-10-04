@@ -130,6 +130,12 @@ class EngineState:
     has no speaker to wait for, so the value changes nothing it does;
     recording it is how a test sees it arrived."""
 
+    hints: list[str | None] = field(default_factory=list)
+    """What each `listen` recorded in `pauses` carried under the contract's
+    `hint_param`, in the same order, None when it carried nothing. The
+    engine returns `heard` whatever it is hinted; recording the hint is how a
+    test sees it arrived."""
+
 
 class _Handler(BaseHTTPRequestHandler):
     state: EngineState
@@ -178,6 +184,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif route.path == contract.listen:
             duration = query.get(contract.duration_param, ["5.0"])[0]
             pause = query.get(contract.pause_param, [None])[0] if contract.pause_param else None
+            hint = query.get(contract.hint_param, [None])[0] if contract.hint_param else None
             try:
                 duration = float(duration)
                 pause = None if pause is None else int(pause)
@@ -189,7 +196,7 @@ class _Handler(BaseHTTPRequestHandler):
                 names = " and ".join(p for p in (contract.duration_param, contract.pause_param) if p)
                 self._send(422, {"detail": f"{names} must be numeric"})
                 return
-            self._listen(duration, pause)
+            self._listen(duration, pause, hint)
         elif contract.conversation and route.path == contract.conversation:
             length = int(self.headers.get("Content-Length") or 0)
             self.state.announced.append(json.loads(self.rfile.read(length) or b"{}"))
@@ -208,7 +215,7 @@ class _Handler(BaseHTTPRequestHandler):
         dirs = " or ".join(str(d) for d in self.state.audio_dirs)
         self._send(404, {"detail": f"No such file under {dirs}: {filename}"})
 
-    def _listen(self, duration: float, pause: int | None) -> None:
+    def _listen(self, duration: float, pause: int | None, hint: str | None = None) -> None:
         contract = self.state.contract
         if not 0 < duration <= 60:
             self._send(400, {"detail": "duration must be between 0 and 60 seconds"})
@@ -224,6 +231,7 @@ class _Handler(BaseHTTPRequestHandler):
         # Recorded once the request is one the engine would act on, so a test
         # reading `pauses` sees what was accepted and never what was refused.
         self.state.pauses.append(pause)
+        self.state.hints.append(hint)
         if self.state.microphone is None:
             self._send(503, {"detail": "No microphone found on the engine's machine."})
         else:
