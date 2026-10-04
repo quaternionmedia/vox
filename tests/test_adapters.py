@@ -9,8 +9,12 @@ wanted a different engine would be installing this one anyway.
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import vox
+from vox.adapters import pyttsx3 as pyttsx3_adapter
 from vox.adapters.pyttsx3 import Pyttsx3TTS
+
 
 
 def test_speak_writes_to_generated_path_and_drives_engine(tmp_path):
@@ -74,6 +78,103 @@ def test_speak_respects_explicit_out_path(tmp_path):
 
     assert out_path == explicit_path
     fake_engine.save_to_file.assert_called_once_with("hi", explicit_path)
+
+
+# ─── SAPI, driven directly on Windows ─────────────────────────────────────────
+
+
+class _Token:
+    def __init__(self, name):
+        self.name = name
+
+    def GetDescription(self):  # noqa: N802 -- SAPI's spelling
+        return self.name
+
+
+class _FakeSapi:
+    """`comtypes.client` standing in for SAPI: voices and file streams, recorded."""
+
+    OUTPUTS = ("Realtek HD Audio 2nd output", "Speakers (Realtek(R) Audio)", "Headphones (USB Audio)")
+
+    def __init__(self):
+        self.voices, self.streams = [], []
+
+    def CreateObject(self, progid):  # noqa: N802 -- comtypes' spelling
+        if progid == "SAPI.SpVoice":
+            voice = MagicMock()
+            voice.GetAudioOutputs.return_value = [_Token(n) for n in self.OUTPUTS]
+            voice.AudioOutput = None
+            self.voices.append(voice)
+            return voice
+        stream = MagicMock()
+        self.streams.append(stream)
+        return stream
+
+
+def _sapi_installed(monkeypatch):
+    fake = _FakeSapi()
+    comtypes = MagicMock()
+    comtypes.client = fake
+    monkeypatch.setitem(sys.modules, "comtypes", comtypes)
+    monkeypatch.setitem(sys.modules, "comtypes.client", fake)
+    monkeypatch.setattr(pyttsx3_adapter, "_sapi", lambda: True)
+    return fake
+
+
+def test_on_sapi_the_file_is_written_then_played_synchronously(monkeypatch, tmp_path):
+    """Mutation: play with pyttsx3's `say` again -- red, nothing reaches
+    `SpeakStream`, which is what returned without playing."""
+    fake = _sapi_installed(monkeypatch)
+
+    out_path = Pyttsx3TTS(out_dir=str(tmp_path)).speak("Anything else?")
+
+    writer, player = fake.voices
+    writer.Speak.assert_called_once_with("Anything else?", 0)
+    assert writer.AudioOutputStream is fake.streams[0]
+    fake.streams[0].Open.assert_called_once_with(out_path, pyttsx3_adapter.SSFM_CREATE_FOR_WRITE)
+    fake.streams[1].Open.assert_called_once_with(out_path, pyttsx3_adapter.SSFM_OPEN_FOR_READ)
+    player.SpeakStream.assert_called_once_with(fake.streams[1], 0)
+    assert player.AudioOutput is None  # the platform default
+
+
+def test_on_sapi_a_named_output_is_the_one_played_to(monkeypatch, tmp_path):
+    fake = _sapi_installed(monkeypatch)
+
+    Pyttsx3TTS(out_dir=str(tmp_path), output_device="speakers").speak("hi")
+
+    assert fake.voices[1].AudioOutput.GetDescription() == "Speakers (Realtek(R) Audio)"
+
+
+def test_on_sapi_vox_output_device_names_it_when_no_argument_does(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOX_OUTPUT_DEVICE", "headphones")
+    fake = _sapi_installed(monkeypatch)
+
+    Pyttsx3TTS(out_dir=str(tmp_path)).speak("hi")
+
+    assert fake.voices[1].AudioOutput.GetDescription() == "Headphones (USB Audio)"
+
+
+def test_on_sapi_an_output_matching_several_or_none_is_refused(monkeypatch, tmp_path):
+    """Mutation: take the first match -- red, "realtek" would pick a jack nobody hears."""
+    _sapi_installed(monkeypatch)
+
+    for fragment in ("realtek", "monitor"):
+        with pytest.raises(ValueError, match=f"output '{fragment}' matches"):
+            Pyttsx3TTS(out_dir=str(tmp_path), output_device=fragment).speak("hi")
+
+
+def test_on_sapi_playback_off_writes_the_file_and_plays_nothing(monkeypatch, tmp_path):
+    fake = _sapi_installed(monkeypatch)
+
+    Pyttsx3TTS(out_dir=str(tmp_path), playback=False).speak("hi")
+
+    assert len(fake.voices) == 1 and len(fake.streams) == 1
+
+
+def test_on_sapi_the_outputs_are_listed_by_name(monkeypatch):
+    _sapi_installed(monkeypatch)
+
+    assert pyttsx3_adapter.outputs() == list(_FakeSapi.OUTPUTS)
 
 
 # ─── the line between the seam and the adapters ───────────────────────────────
