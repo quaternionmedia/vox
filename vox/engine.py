@@ -130,6 +130,10 @@ class EngineState:
     has no speaker to wait for, so the value changes nothing it does;
     recording it is how a test sees it arrived."""
 
+    confidence: float | None = None
+    """What `listen` reports under the contract's `confidence_key`, when both
+    are set: the test's script for how sure the engine was."""
+
     hints: list[str | None] = field(default_factory=list)
     """What each `listen` recorded in `pauses` carried under the contract's
     `hint_param`, in the same order, None when it carried nothing. The
@@ -241,15 +245,15 @@ class _Handler(BaseHTTPRequestHandler):
             # a real, decodable file.
             capture_dir = self.state.capture_dir or self.state.audio_dirs[0]
             path = encode_wav(self.state.heard, capture_dir / "capture.wav")
-            self._send(
-                200,
-                {
-                    contract.text_key: self.state.heard,
-                    "segments": [],
-                    "language": "en",
-                    contract.audio_path_key: path,
-                },
-            )
+            body = {
+                contract.text_key: self.state.heard,
+                "segments": [],
+                "language": "en",
+                contract.audio_path_key: path,
+            }
+            if contract.confidence_key and self.state.confidence is not None:
+                body[contract.confidence_key] = self.state.confidence
+            self._send(200, body)
 
 
 @contextmanager
