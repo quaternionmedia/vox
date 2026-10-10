@@ -150,7 +150,7 @@ MUTATIONS = [
         find="        if self.contract.pause_param and pause_ms is not None:\n            params[self.contract.pause_param] = pause_ms",
         replace='        if pause_ms is not None:\n            params[self.contract.pause_param or "pause_ms"] = pause_ms',
         catches="tests/test_stt.py::test_listen_sends_no_pause_on_a_contract_without_one",
-        why="An engine with no such parameter would be sent one under a name it never agreed to, and the seam would have hardcoded a spelling again.",
+        why="An engine with no such parameter would be sent one under a name it never agreed to, and the seam would hardcode a spelling.",
     ),
     Mutation(
         name="the client drops the hint it was asked to send",
