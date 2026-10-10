@@ -1,9 +1,8 @@
 """Break each guard on purpose, and check it goes red.
 
-A check is evidence only after it has been seen to fail. Reading one tells
-you what its author meant, not what it catches — and this repository has
-the shape that produces inert tests: a stand-in engine, a codec, and a
-suite that was entirely mocks a day ago.
+A check is evidence only after it has been seen to fail: reading one says
+what it was meant to catch, not what it catches. This repository has the
+shape that produces inert tests: a stand-in engine and a codec.
 
 Each entry below names a guard, the one-line change that should defeat it,
 and the test that must fail when it does. Running this applies each change,
@@ -178,12 +177,12 @@ MUTATIONS = [
         why="A display could no longer offer the answers as controls, so a person who cannot be heard has no other way to answer.",
     ),
     Mutation(
-        name="the SAPI path plays with pyttsx3's say again",
+        name="the SAPI path plays through pyttsx3's say",
         path="vox/adapters/pyttsx3.py",
         find="        if _sapi():\n            self.cut = _sapi_speak(text, out_path, self.playback, self.output_device, until)\n            return out_path\n",
         replace="",
         catches="tests/test_adapters.py::test_on_sapi_the_file_is_written_then_played_synchronously",
-        why="On the machine it was measured on, pyttsx3's say returned without playing: every sentence went into a file and the person heard nothing.",
+        why="On Windows a sentence would be played through pyttsx3's say instead of SAPI's synchronous SpeakStream, and speak could return before it had been heard.",
     ),
     Mutation(
         name="a named output that matches several is guessed",
@@ -218,12 +217,12 @@ MUTATIONS = [
         why="Every refusal case still passes against an exclusive bound; only a test sending the edges themselves tells an inclusive bound from one off by one.",
     ),
     Mutation(
-        name="every call builds its own client again",
+        name="every call builds its own client",
         path="vox/stt.py",
         find="        if self._client is None:\n            self._client = httpx.Client(timeout=self.timeout)\n        return self._client",
         replace="        return httpx.Client(timeout=self.timeout)",
         catches="tests/test_stt.py::test_one_client_serves_every_call",
-        why="Nothing breaks — the loop just costs ~620 ms per call again. A regression with no symptom except slowness is the kind nobody notices.",
+        why="Nothing breaks: each call pays for a new client and its SSL context, and the loop slows with no other symptom.",
     ),
     Mutation(
         name="a question is never cut short",
@@ -291,10 +290,9 @@ def main() -> int:
     for mutation in MUTATIONS:
         target = ROOT / mutation.path
         # Bytes, not text, on both sides. `write_text` translates newlines to
-        # the platform separator, so restoring a LF file on Windows put CRLF
-        # back and left four source files reported as modified by a harness
-        # whose whole job is to leave no trace. The content was identical every
-        # time, which is why a check comparing content missed it.
+        # the platform separator, so an LF file restored through it on Windows
+        # comes back as CRLF: the same content, different bytes, and the file
+        # reported modified.
         original = target.read_bytes()
         source = original.decode("utf-8").replace("\r\n", "\n")
         if mutation.find not in source:
@@ -306,10 +304,9 @@ def main() -> int:
             result = _run(mutation.catches)
         finally:
             target.write_bytes(original)
-            # Assert the restore rather than trusting it. This harness edits
-            # tracked source, so "put it back" is the one thing it must never
-            # get quietly wrong — and the previous version got it wrong for
-            # every LF file on this platform without anything noticing.
+            # Assert the restore rather than trusting it: this harness edits
+            # tracked source, so a restore that is not byte-for-byte stops the
+            # run.
             if target.read_bytes() != original:
                 raise SystemExit(f"{mutation.path} was not restored byte-for-byte; check `git diff`")
 

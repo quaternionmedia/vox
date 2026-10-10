@@ -3,19 +3,13 @@
 `EngineContract` is the set of paths, parameters and response keys an HTTP
 speech engine must answer with. It is a value: a caller constructs a
 different one, and every part of vox — the client, the session, the
-deterministic engine, the walkthrough — works against it unchanged. A seam
-that names one engine is a coupling with extra steps, and a class per engine
-is what that coupling looks like.
+deterministic engine, the walkthrough — works against it unchanged, with no
+class per engine.
 
-The defaults have to be some engine's spelling. They are one engine's because
-one had to be first, not because it is special; `vox.adapters.joe` names that
-engine, and naming it is the whole of that module's job.
-
-**The claim is only as good as its test.** A default that is the only value
-ever exercised is a hardcoding with a longer spelling, so
-`tests/test_contract.py` runs the whole closed loop against a contract
-sharing no path, no parameter name and no response key with the default. A
-seam that works one way fails it.
+The defaults are one engine's spelling, and `vox.adapters.joe` names that
+engine. `tests/test_contract.py` runs the whole closed loop against a
+contract sharing no path, no parameter name and no response key with the
+default, so a part of vox that reads a default spelling directly fails it.
 """
 
 from __future__ import annotations

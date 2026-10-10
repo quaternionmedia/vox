@@ -22,19 +22,15 @@ class TextToSpeech(Protocol):
 class RecordingTTS:
     """Deterministic synthesis: writes the WAV, drives no sound card.
 
-    A real synthesizer needs an audio device, takes a variable amount of
-    wall-clock time, and produces different bytes on different machines.
-    None of that can be asserted on, so a loop built around one can only
-    ever be run by hand.
-
-    This backend writes the same file every time for the same text, via
+    Writes the same file every time for the same text, via
     `vox.engine.encode_wav`, which the deterministic engine's transcribe
-    route reads back. That is what closes the loop offline: the text really
-    does travel out to a file on disk and come back in over HTTP, rather
-    than being carried around the side in a mock's return value.
+    route reads back: the text travels out to a file on disk and back in
+    over HTTP. A real synthesizer needs an audio device, takes a variable
+    time and writes different bytes on different machines, so a loop built
+    on one cannot be asserted on.
 
-    It is a codec and not a voice. Nobody can listen to the output and hear
-    words — for that, use a real synthesizer adapter against a real engine.
+    It is a codec and not a voice: nobody listening to the output hears
+    words. For that, use a real synthesizer adapter against a real engine.
     """
 
     def __init__(self, out_dir: str = "Data/Voice/out"):

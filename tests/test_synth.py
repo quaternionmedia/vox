@@ -1,11 +1,10 @@
 """Offline speech synthesis with nothing installed.
 
 These do not assert that the output sounds like anything: no test can, and
-the one claim worth making about audibility is measured against a real
-engine and written down in `SPEECH_IS_NOT_TRANSCRIBABLE` rather than
-asserted here. What is checked is that it produces a valid, deterministic,
-in-range waveform that differs with the text — the properties a caller
-depends on.
+whether it is transcribable is stated in `SPEECH_IS_NOT_TRANSCRIBABLE` rather
+than asserted here. What is checked is that it produces a valid,
+deterministic, in-range waveform that differs with the text — the properties
+a caller depends on.
 """
 
 from __future__ import annotations
@@ -120,14 +119,11 @@ def test_two_different_vowels_produce_different_audio():
 # ─── the claim that is measured, not asserted ────────────────────────────────
 
 def test_the_backend_says_it_is_not_transcribable():
-    """Measured against a live engine: whisper returns empty for this output.
+    """Whisper does not read this output, and the backend says so.
 
-    The control matters as much as the measurement — real synthesis through
-    the identical path came back as "approve the deploy." — so the empty
-    result is a property of this synthesizer and not of the pipeline.
-
-    A caller branches on this rather than rediscovering it. If somebody
-    improves the synthesizer, this test and the constant move together.
+    A caller branches on this rather than rediscovering it. When the
+    synthesizer is good enough to be transcribed, this test and the constant
+    change together.
     """
     assert SPEECH_IS_NOT_TRANSCRIBABLE is True
     assert FormantTTS.transcribable is False
@@ -141,7 +137,7 @@ def test_it_is_reachable_by_name_from_the_cli():
 
 
 def test_it_needs_nothing_outside_the_standard_library():
-    """The whole point: no system voice, no wheel, no model.
+    """No system voice, no wheel, no model.
 
     Checked by reading the imports rather than by installing nothing,
     because the test process already has vox's own dependencies.

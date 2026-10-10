@@ -64,8 +64,7 @@ def test_it_refuses_audio_it_did_not_write(tmp_path):
     """A recording of a human voice is an error, not a transcript.
 
     Without the marker the engine would read whatever the samples happened
-    to spell and answer 200 with it, which is the worst failure available:
-    a stand-in that cannot tell it was handed the real thing.
+    to spell and answer 200 with it.
     """
     path = tmp_path / "human.wav"
     with wave.open(str(path), "wb") as wav:

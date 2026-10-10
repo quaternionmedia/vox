@@ -1,13 +1,9 @@
 """Does the built wheel contain the package, or only the parts development sees?
 
 An editable install resolves imports against the source tree, so every
-subpackage is importable in development whether or not the build declares it.
-That is how `vox/adapters/` was shipped in a wheel containing none of it, and
-how joe's `Modules/` went uninstalled long enough for a console script to fail
-in somebody's hands. Nothing in a test suite catches it, because the test
-suite runs against the editable install.
-
-This reads the wheel's own manifest.
+subpackage is importable in development whether or not the build declares it,
+and a test suite running against the editable install cannot see a
+subpackage the wheel leaves out. This reads the wheel's own manifest.
 
     uv run python walkthrough/check_wheel.py
 
@@ -39,25 +35,25 @@ REQUIRED = [
     "vox/adapters/joe.py",
     "vox/adapters/pyttsx3.py",
 ]
-"""Every module a consumer can import. A new one belongs here the day it is
-written — the list is the claim, and the wheel is checked against it."""
+"""Every module a consumer can import. A new module is added here with it:
+the wheel is checked against this list, and a shipped module missing from it
+is reported as unlisted."""
 
 
 def main() -> int:
-    # Two pieces of leftover state make this check report on itself, and both
-    # had to be found by breaking the packaging on purpose and watching it
-    # stay green:
+    # Two pieces of leftover state make this check report on itself, so both
+    # are cleared before building:
     #
     #   build/          setuptools stages here and copies from it, so a build
     #                   after a previous one ships what the previous one
     #                   collected.
     #   *.egg-info/     survives a build and carries the package list forward,
-    #                   which is what kept `vox/adapters/` in the wheel after
-    #                   the declaration that put it there had been removed.
+    #                   so a subpackage stays in the wheel after the
+    #                   declaration that put it there is removed.
     #
-    # Clearing `build/` alone was not enough. Verified by reverting the
-    # declaration in a pristine `git ls-files` copy of the tree, where the
-    # adapters are genuinely absent from the wheel.
+    # Mutation: revert the `include` declaration in a clean `git ls-files`
+    # copy of the tree -- red, the adapters are absent from the wheel; with
+    # only `build/` cleared, a leftover `*.egg-info/` keeps it green.
     shutil.rmtree(ROOT / "build", ignore_errors=True)
     for stale in ROOT.glob("*.egg-info"):
         shutil.rmtree(stale, ignore_errors=True)

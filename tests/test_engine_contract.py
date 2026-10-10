@@ -1,15 +1,14 @@
 """Does `vox.engine` answer the way joe answers?
 
-A stand-in that drifts from the thing it stands in for is worse than no
-stand-in: the suite stays green while the seam stops working against the
-real engine, and nobody finds out until a demo. Every expectation here was
-read off joe's `api.py` and `Modules/Voice.py` at `c2d9a01`, except where a
-test's docstring names a later commit, at which that one was read — the
-commit is named so the next reader can diff rather than re-derive.
+A stand-in that drifts from the engine it stands in for keeps the suite
+green while the seam stops working against the real one. Every expectation
+here was read off joe's `api.py` and `Modules/Voice.py` at `c2d9a01`, except
+where a test's docstring names a later commit, at which that one was read;
+the commit is named so a reader can diff rather than re-derive.
 
-These drive the engine through `HttpSTT`, unmodified, over a real socket.
-That is the point: if the client needs a change to talk to the stand-in, the
-stand-in is not standing in.
+These drive the engine through `HttpSTT`, unmodified, over a real socket: a
+client that needed a change to talk to the stand-in would mean the stand-in
+is not standing in.
 """
 
 import httpx
@@ -33,10 +32,8 @@ def engine(tmp_path):
 
 
 def test_it_binds_an_ephemeral_port(engine):
-    """Never a default port: two sessions share this workstation.
-
-    `handbook/async-contract.md` §4 — an afternoon was spent measuring
-    another project's server on 8000.
+    """Never a default port: a fixed port can be another program's server
+    (`handbook/async-contract.md` §4 in the QM corpus).
     """
     base_url, _, _ = engine
     port = int(base_url.rsplit(":", 1)[1])
@@ -158,9 +155,9 @@ def test_listen_refuses_a_silence_ms_joe_refuses(tmp_path, pause, status):
     sending a pause the real engine refuses passes the offline suite and
     fails at a demo.
 
-    Seen to fail before the bounds check existed: every integer case was
-    answered 200 and recorded in `pauses`. Seen to fail before the parse was
-    guarded: the two non-integer cases raised ValueError inside the handler
+    Seen to fail with the bounds check removed: every integer case was
+    answered 200 and recorded in `pauses`. Seen to fail with the parse
+    unguarded: the two non-integer cases raised ValueError inside the handler
     and the client saw a dropped connection (httpx.RemoteProtocolError)
     rather than any status.
     """
@@ -203,7 +200,7 @@ def test_listen_bounds_only_the_pause_its_contract_names(engine):
     names a pause parameter, under that contract's own spelling. On the
     default contract, which names no pause parameter, the same key is an
     alien query parameter the engine never reads: answered 200, nothing
-    recorded, exactly as before the bound existed.
+    recorded.
 
     Seen to fail by reading the bound off a fixed `silence_ms` key rather
     than `contract.pause_param`: the default engine answered 400.
@@ -223,7 +220,7 @@ def test_listen_503s_without_a_microphone(tmp_path):
 
 
 def test_joestt_needs_no_changes_to_drive_it(engine):
-    """The whole point: the client that talks to joe talks to this, unmodified."""
+    """The client that talks to joe talks to this, unmodified."""
     base_url, _, audio_dir = engine
     encode_wav("approve the deploy", audio_dir / "said.wav")
     stt = HttpSTT(base_url)

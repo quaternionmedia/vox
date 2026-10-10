@@ -6,16 +6,12 @@ voice — SAPI on Windows, espeak elsewhere — which is a system package, is
 absent on a plain Linux runner, and has no bytes-identical behaviour across
 machines.
 
-This is the third thing: a formant synthesizer in pure Python. It produces
-audible, recognisably speech-like audio for any text, on any machine, with
-nothing to install and nothing to configure, and it produces the same bytes
-every time.
+This module is a formant synthesizer in pure Python. It produces audible,
+speech-like audio for any text, on any machine, with nothing to install and
+nothing to configure, and the same bytes every time. It is crude: what it
+can be trusted for is in `SPEECH_IS_NOT_TRANSCRIBABLE` below.
 
-**It is crude, and the docstring is the wrong place to claim otherwise.**
-What it can be trusted for is written in `SPEECH_IS_NOT_TRANSCRIBABLE`
-below, next to the measurement that establishes it.
-
-The model, which is about as simple as a formant synthesizer gets:
+The model:
 
 - Text is split into vowel and consonant units by spelling, with a handful
   of digraph rules. English spelling is not phonetic and this makes no
@@ -24,8 +20,7 @@ The model, which is about as simple as a formant synthesizer gets:
   by a buzz at the pitch.
 - A fricative is filtered noise; a stop is a silence and a burst; a nasal
   is a low resonance.
-- Pitch falls across an utterance, because a flat pitch sounds like a
-  machine even by the standards of this machine.
+- Pitch falls across an utterance; a flat pitch sounds least like speech.
 """
 
 from __future__ import annotations
@@ -43,12 +38,6 @@ SAMPLE_RATE = 16000
 SPEECH_IS_NOT_TRANSCRIBABLE = True
 """Whisper does not read this synthesizer's output.
 
-Measured 2026-09-27 against a live engine running whisper `base`: the phrase
-"approve the deploy" came back as unrelated text, and so did every other
-phrase tried. Two-formant-per-vowel synthesis with no coarticulation, no
-prosody to speak of and spelling-based phonemes is not close enough to
-speech for a model trained on human recordings.
-
 So this backend closes the *audio* leg of a round trip and not the
 *transcription* leg. `VoiceSession.round_trip` against a real engine needs
 `Pyttsx3TTS` or another real voice. What this is for:
@@ -58,9 +47,9 @@ So this backend closes the *audio* leg of a round trip and not the
 - a deterministic WAV that is also a waveform, when `RecordingTTS`'s
   codec output is too far from audio to be a useful stand-in.
 
-The constant is here so that a caller can branch on it rather than
-rediscovering it, and so the day somebody improves this enough to be
-transcribed, one edit and one test move together.
+A caller branches on the constant rather than rediscovering it. When the
+synthesizer is good enough to be transcribed, this constant and its test in
+`tests/test_synth.py` change together.
 """
 
 # Formant frequencies (F1, F2, F3) in Hz. Textbook values for a male voice;
@@ -246,8 +235,7 @@ class FormantTTS:
     """Audible offline synthesis with nothing installed.
 
     Read `SPEECH_IS_NOT_TRANSCRIBABLE` before using this to close a loop
-    through a real speech engine: whisper does not read this output, and
-    that is measured rather than assumed.
+    through a real speech engine: whisper does not read this output.
     """
 
     transcribable = not SPEECH_IS_NOT_TRANSCRIBABLE

@@ -55,13 +55,12 @@ def test_it_went_over_the_wire(loop):
     """The loop used HTTP, rather than a mock returning the answer.
 
     Without this the suite would pass just as well if `round_trip` handed
-    the text to itself — which is what every vox test did before
-    `vox.engine` existed.
+    the text to itself.
 
-    The echo is a *bare* filename. It was `out/echo.wav`, which vox's own
-    engine accepts and a real one refuses: a name with a separator in it is
-    how a path traversal gets in, so engines reject it. This assertion is
-    where that would be caught next time.
+    The echo is a *bare* filename: `vox.engine` accepts a name with a
+    directory in it, and a real engine may refuse one, because a name with a
+    separator in it lets a path traversal in. This assertion pins the bare
+    name.
     """
     _, requests = loop
     assert requests == [
@@ -75,9 +74,8 @@ def test_the_audio_is_a_real_file_written_this_run(loop):
     """Assert the intermediate: a leftover file from a previous run closes the loop too.
 
     `tmp_path_factory` gives each run its own directory, so this can only
-    pass if `speak` actually wrote. The check is here because a stale
-    artifact is exactly how this guard would report green while doing
-    nothing — `AGENTS.md` item 12.
+    pass if `speak` actually wrote; a stale artifact would let this guard
+    report green while doing nothing.
     """
     result, _ = loop
     spoken = Path(result.spoken_path)
@@ -148,11 +146,9 @@ other half of the question.
 """,
         encoding="utf-8",
         # Pinned to LF so a Windows run writes the same bytes a Linux run
-        # does. Without it, text mode translates to the platform separator,
-        # `git status` reports this artifact modified after every local test
-        # run, and a contributor reads that as the drift the file exists to
-        # make impossible. The content was never drifting; the line endings
-        # were.
+        # does: text mode would translate to the platform separator, and
+        # `git status` would report this artifact modified after every local
+        # run though its content had not changed.
         newline="\n",
     )
     assert ARTIFACT.stat().st_size > 0

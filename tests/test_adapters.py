@@ -32,12 +32,10 @@ def test_speak_writes_to_generated_path_and_drives_engine(tmp_path):
 
 
 def test_speak_is_audible_and_returns_only_after_the_audio_ends(tmp_path):
-    """The finding this pins: `save_to_file` writes a WAV and plays nothing,
-    so a live loop spoke into a file while the human sat in silence — and
-    then opened the microphone. Speaking means being heard, and the order
-    matters: the say happens after the file is complete, and `speak` returns
-    only after the final `runAndWait`, so a caller that listens next cannot
-    talk over its own prompt."""
+    """`save_to_file` writes a WAV and plays nothing, so `speak` also says
+    the text. The order matters: the say happens after the file is complete,
+    and `speak` returns only after the final `runAndWait`, so a caller that
+    listens next cannot talk over its own prompt."""
     fake_pyttsx3 = MagicMock()
     fake_engine = MagicMock()
     fake_pyttsx3.init.return_value = fake_engine
@@ -122,8 +120,8 @@ def _sapi_installed(monkeypatch):
 
 
 def test_on_sapi_the_file_is_written_then_played_synchronously(monkeypatch, tmp_path):
-    """Mutation: play with pyttsx3's `say` again -- red, nothing reaches
-    `SpeakStream`, which is what returned without playing."""
+    """Mutation: play with pyttsx3's `say` instead -- red, nothing reaches
+    `SpeakStream`."""
     fake = _sapi_installed(monkeypatch)
 
     out_path = Pyttsx3TTS(out_dir=str(tmp_path)).speak("Anything else?")

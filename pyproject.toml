@@ -25,12 +25,11 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-# `include`, not an explicit list. `packages = ["vox"]` shipped a wheel with
-# no `vox/adapters/` in it, because an explicit list is not recursive -- the
-# editable install used for development resolves against the source tree and
-# hides that completely. joe had the same defect for the same reason. The CI
-# step that builds a wheel and reads its manifest is what catches it now, and
-# `vox*` means a new subpackage is included without anyone remembering to.
+# `include`, not an explicit list: an explicit list is not recursive, and the
+# editable install used for development resolves against the source tree, so
+# a subpackage left out still imports there. `vox*` takes in a new subpackage
+# with no further edit, and `walkthrough/check_wheel.py` reads the built
+# wheel's manifest in CI.
 include = ["vox*"]
 
 [tool.pytest.ini_options]
