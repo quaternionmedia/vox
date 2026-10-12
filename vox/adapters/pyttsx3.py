@@ -18,8 +18,7 @@ SSFM_OPEN_FOR_READ, SSFM_CREATE_FOR_WRITE = 0, 3
 # SAPI's speak flags: return at once, and drop whatever is still playing.
 SVSF_ASYNC, SVSF_PURGE = 1, 2
 # How often a sentence that may be interrupted asks whether it has been, and
-# how long a stop may take to settle, in milliseconds. Measured on a virtual
-# cable: the audio ended within one 100 ms block of the stop.
+# how long a stop may take to settle, in milliseconds.
 UNTIL_POLL_MS = 100
 STOP_WAIT_MS = 2000
 
@@ -27,13 +26,9 @@ STOP_WAIT_MS = 2000
 def _sapi() -> bool:
     """Whether to drive SAPI directly rather than through pyttsx3: on Windows.
 
-    **PYTTSX3'S EVENT LOOP DID NOT PLAY.** Measured on the workstation this
-    was built on: after `save_to_file`, `say` with `runAndWait` returned in
-    0.09 s for a sentence 2.8 s long, and a conversation spoke every line into
-    files while the person heard nothing; re-initialising the engine in the
-    same process then hung. SAPI's own `Speak` into a file stream, and a
-    synchronous `SpeakStream` of that file, played each sentence for exactly
-    its length, three in a row, in one process.
+    There a sentence is written with SAPI's own `Speak` into a file stream and
+    played with a synchronous `SpeakStream` of that file, rather than through
+    pyttsx3's `say` and `runAndWait`.
     """
     return sys.platform == "win32"
 
@@ -51,8 +46,8 @@ def outputs() -> list[str]:
 
 def _output_token(voice, fragment: str):
     """The one output whose name contains `fragment`, ignoring case. A
-    fragment matching none or several is refused rather than guessed: one
-    machine here lists the same headset under several names."""
+    fragment matching none or several is refused rather than guessed: a
+    machine can list the same headset under several names."""
     matches = [t for t in voice.GetAudioOutputs() if fragment.lower() in t.GetDescription().lower()]
     if len(matches) != 1:
         names = [t.GetDescription() for t in voice.GetAudioOutputs()]
@@ -112,16 +107,15 @@ class Pyttsx3TTS:
     That ordering is the polite-speaker contract — a caller that opens a
     microphone right after `speak` returns cannot record over its own prompt,
     because the prompt is over. `save_to_file` alone writes a WAV and plays
-    nothing, which once left a live loop recording a human who had heard
-    only silence; `playback=False` keeps that file-only behaviour for
-    artifact generation, where sound is noise.
+    nothing; `playback=False` keeps that file-only behaviour for artifact
+    generation, where sound is noise.
 
     **A question can be answered over.** With `until`, a callable, the voice
     stops as soon as it returns true -- asked every `UNTIL_POLL_MS` -- and
     `speak` returns once it has, so a person who answers before the question
     ends is not talked over; `cut` says whether the last sentence was. Only
-    on SAPI: pyttsx3's own loop has no stop that was seen to work, and plays
-    to the end.
+    on SAPI: through pyttsx3's own loop `until` is not consulted, and the
+    sentence plays to the end.
     """
 
     def __init__(self, out_dir: str = "Data/Voice/out", playback: bool = True,

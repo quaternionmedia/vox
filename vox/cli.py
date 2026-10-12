@@ -136,9 +136,9 @@ def doctor(engine: str = ENGINE, url: str = URL, voice: str = VOICE):
         typer.echo(f"[ok]   text-to-speech: {voice} synthesizes")
     except typer.Exit:
         # `_synthesizer` refusing an unknown name is a usage error, not a
-        # broken audio stack. `typer.Exit` is not a `SystemExit`, so catching
-        # the latter here let the refusal fall through to the handler below
-        # and be reported as a synthesis failure with the wrong exit code.
+        # broken audio stack, and leaves with its own exit code. `typer.Exit`
+        # is not a `SystemExit`: catching `SystemExit` here would not stop the
+        # handler below from reporting the refusal as a synthesis failure.
         raise
     except Exception as exc:
         ok = False
@@ -226,17 +226,15 @@ def loop(
         else:
             typer.echo(f"engine:     {base_url} ({engine})")
 
-        # **THE INPUT IS SYNTHESIZED, IN BOTH MODES, BY THE BACKEND THAT WILL
-        # SPEAK THE ECHO.** Only the offline branch wrote `said.wav` before,
-        # so `vox loop` against a real engine transcribed a file nothing had
-        # created and died on a 404. Using one backend for both legs also
-        # makes the comparison mean something: the same voice goes out and
-        # comes back.
+        # The input is synthesized, in both modes, by the backend that speaks
+        # the echo: `said.wav` exists before the engine is asked for it, and
+        # the same voice goes out and comes back.
         tts.speak(say, out_path=str(Path(echo_dir) / "said.wav"))
 
         stt = stack.enter_context(HttpSTT(base_url, contract=contract))
-        # Ask what is listening before believing anything measured against it:
-        # a 200 proves something is there, not that it is the right something.
+        # Refuse to run against an engine that does not answer its health
+        # route. A 200 proves something is there, not that it is the right
+        # something; the output above names the URL and the adapter.
         if not stt.reachable():
             typer.echo(f"[fail] nothing answering at {base_url} -- run `vox doctor`.", err=True)
             raise typer.Exit(1)

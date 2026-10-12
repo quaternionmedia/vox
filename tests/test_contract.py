@@ -1,15 +1,8 @@
-"""Is the seam actually independent of any one engine, or does it just say so?
+"""Is the seam independent of any one engine, or does it only say so?
 
-vox used to have a single speech-to-text class named for the engine it
-talked to, with that engine's routes spelled inline. Replacing the name with
-`HttpSTT` and moving the paths into a dataclass changes nothing on its own —
-a default that is the only value ever used is a hardcoding with a longer
-spelling.
-
-So these run the whole thing against `ALIEN`, a contract that shares **no
-path, no parameter name and no response key** with the default. If any part
-of vox still reaches for the original spelling, they fail. That is the only
-form of this claim worth making.
+These run the whole thing against `ALIEN`, a contract that shares no path,
+no parameter name and no response key with the default. A part of vox that
+reaches for the default spelling directly fails them.
 """
 
 from dataclasses import replace
@@ -207,11 +200,10 @@ def test_the_default_contract_is_not_secretly_the_alien_one(engine):
 
 def test_the_named_adapter_matches_the_default_today(engine):
     """`JOE` is written out in full and equals the defaults, apart from the
-    conversation route and the pause and hint parameters, which the default
-    leaves unset because not every engine has them.
+    optional routes and keys, which the default leaves unset because not
+    every engine has them.
 
-    Stated as a test rather than a comment so that the day one of them moves,
-    something says so instead of the two quietly drifting.
+    A test rather than a comment, so a change to either says so.
     """
     assert replace(JOE, conversation=None, pause_param=None, hint_param=None,
                    confidence_key=None, watch=None, unwatch=None, control=None) == EngineContract()

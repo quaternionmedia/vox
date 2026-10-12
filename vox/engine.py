@@ -2,23 +2,19 @@
 
 A real speech engine transcribes with a neural model off a real microphone.
 Neither is available in a test run and neither is deterministic: the model is
-behind a download, and the microphone is hardware somebody has to plug in. So
-every vox test before this module replaced the client with a `MagicMock`,
-which proves the call was made and nothing about the wire.
+behind a download, and the microphone is hardware somebody has to plug in.
 
-This module replaces the *engine*, not the client. `serve()` starts a real
-HTTP server on a real socket answering an `EngineContract`, so `HttpSTT` runs
-unmodified against it — same calls, same JSON, same status codes. It serves
-whichever contract it is given, which is what lets `tests/test_contract.py`
-prove the seam is not wired to one engine's spelling.
+This module stands in for the *engine*, not the client. `serve()` starts a
+real HTTP server on a real socket answering an `EngineContract`, so `HttpSTT`
+runs unmodified against it — same calls, same JSON, same status codes. It
+serves whichever contract it is given, which lets `tests/test_contract.py`
+show the seam is not wired to one engine's spelling.
 
-**This is a codec, not a voice.** `encode_wav` writes the text into a real
-WAV file's samples and `decode_wav` reads it back, so a round trip proves the
+**A codec, not a voice.** `encode_wav` writes the text into a real WAV
+file's samples and `decode_wav` reads it back, so a round trip proves the
 seam — the HTTP contract, the file handoff, the orchestration, the loop
-closing — and proves nothing whatever about transcription accuracy. That is
-the trade made deliberately: the parts that can be deterministic are, and the
-part that cannot is checked against a real engine and reported as a separate
-claim.
+closing — and nothing about transcription accuracy, which is checked against
+a real engine as a separate claim.
 """
 
 from __future__ import annotations
@@ -41,10 +37,9 @@ SAMPLE_RATE = 16000
 MAGIC = b"VOX1"
 """Marks a WAV as written by `encode_wav`.
 
-Without it `decode_wav` would happily read a recording of a human voice as
-whatever its samples happened to spell, and the engine would answer with
-confident nonsense instead of an error. A stand-in that cannot tell it was
-handed real audio is a stand-in nobody can trust.
+Without it `decode_wav` would read any 16-bit mono recording as whatever its
+samples spell; with it, audio `encode_wav` did not write raises
+`NotVoxAudioError`.
 """
 
 
@@ -277,16 +272,15 @@ class _Handler(BaseHTTPRequestHandler):
 def serve(state: EngineState | None = None):
     """Run the engine on an ephemeral port. Yields `(base_url, state)`.
 
-    The port is 0, so the OS picks it and the caller reads back what it got —
-    two sessions run on one workstation here, and a hard-coded 8000 has
-    already cost an afternoon of measuring the wrong program.
+    The port is 0, so the OS picks it and the caller reads back what it got:
+    a fixed port can be another program's server.
     """
     state = state or EngineState()
     handler = type("_BoundHandler", (_Handler,), {"state": state})
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     # `serve_forever`'s default poll interval is 0.5s, and `shutdown()` waits
-    # out one of them — which is paid on every teardown and was most of this
-    # suite's runtime. A short loop is the whole point of the offline engine.
+    # out one of them on every teardown; a short interval keeps each teardown,
+    # and so the offline loop, short.
     thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True)
     thread.start()
     try:

@@ -16,8 +16,8 @@ import httpx
 
 from vox.contract import EngineContract
 
-# Seconds an announcement may take. It feeds a display, and a question that
-# waits on one has its priorities the wrong way round.
+# Seconds an announcement may take. It feeds a display, and a question never
+# waits long on one.
 ANNOUNCE_TIMEOUT = 2.0
 # Seconds asking whether a question was interrupted may take. It is asked
 # every tenth of a second while the question is said.
@@ -47,14 +47,9 @@ class HttpSTT:
     """Speech-to-text over HTTP, against any engine matching an `EngineContract`.
 
     One `httpx.Client` is held for the life of the instance and reused by
-    every call. That is not tidiness: `httpx.get`/`httpx.post` at module
-    level construct a fresh `Client` per call, and constructing one costs
-    **~620 ms on the workstation this was measured on** — ~240 ms of it
-    `ssl.create_default_context(cafile=certifi.where())`, paid whether or
-    not the URL is `https`. A closed loop makes three of these calls, so the
-    module-level form spent about two seconds per iteration doing nothing.
-    Measured 2026-09-27 against `vox.engine`; a reused client answers the
-    same request in ~10 ms.
+    every call. `httpx.get`/`httpx.post` at module level build a client per
+    call, each with an SSL context made whether or not the URL is `https`,
+    and building one costs far more than a request to a local engine.
 
     Close it with `close()`, or use the instance as a context manager. An
     `httpx.Client` passed in is the caller's to close.

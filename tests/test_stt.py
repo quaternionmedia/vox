@@ -1,10 +1,7 @@
 """`HttpSTT`'s side of the wire, driven through an injected client.
 
-These used to patch `vox.stt.httpx.post`, which worked because every call
-built its own client at module level. `HttpSTT` now holds one — see its
-docstring for why — so the tests hand it a client instead of patching the
-module. That is the better seam anyway: it exercises the `client=`
-parameter a caller would use, rather than reaching inside.
+The tests hand `HttpSTT` a client through the `client=` parameter a caller
+would use, rather than patching the module.
 """
 
 from unittest.mock import MagicMock
@@ -210,12 +207,11 @@ def test_announce_reports_a_refusal_as_not_taken():
 
 
 def test_one_client_serves_every_call():
-    """The change that made the loop short, asserted rather than assumed.
+    """One client serves every call, asserted rather than assumed.
 
-    A new `httpx.Client` per call costs ~620 ms on this workstation, most of
-    it building an SSL context it never uses over http. If this regresses,
-    nothing fails — the loop just gets slow again — so the test is here to
-    make the regression loud.
+    A new `httpx.Client` per call builds an SSL context each time, even over
+    http, and the only symptom is a slower loop, so the reuse is asserted
+    here.
     """
     stt = HttpSTT("http://127.0.0.1:8000")
     assert stt.client is stt.client
