@@ -4,7 +4,7 @@ Where vox sits in a three-repository voice loop, for someone picking it up
 cold. `README.md` is the surface; this is the part that is not visible from
 inside this clone.
 
-**Stamped 2026-10-03**, at `vox` `main` `d94fe6b`, `joe` `main` `2ba994d`,
+**Stamped 2026-10-12**, at `vox` `main` `2658481`, `joe` `main` `2ba994d`,
 `qmcp` `main` `ed01fc0`. Every figure was true at those commits and nowhere
 else.
 
@@ -29,8 +29,9 @@ audio --> a speech engine (STT over HTTP) --> transcript --> vox TTS --> audio
   with no `__init__.py` resolves `import vox` to an empty namespace package
   in place of this one.
 
-Nothing under `vox/` imports `vox.adapters`, and a test asserts it in a
-subprocess. A product is named there and nowhere else.
+Importing `vox` loads no adapter, and a test asserts it in a fresh
+interpreter. Products are named in `vox.adapters`; the CLI imports that
+package and resolves `--engine` and `--voice` against it.
 
 ## Running it
 
@@ -84,7 +85,9 @@ loop through transcription needs `pyttsx3` or another real voice.
   offline engine takes an ephemeral port and reports which; a real engine's
   is `--url`.
 - **Ask what is listening.** A 200 proves a server is there, not that it is
-  the right one. `vox doctor` names the engine it reached.
+  the right one. `vox doctor` reports that 200 from the contract's health
+  route beside the adapter and URL it was given, and does not tell which
+  server answered.
 
 ## What this does not establish
 
