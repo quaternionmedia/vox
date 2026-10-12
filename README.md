@@ -106,6 +106,12 @@ raises: a display that cannot be told is no reason for a question to go
 unasked. On a contract without the route, announcing does nothing.
 `vox.adapters.joe` names joe's.
 
+An engine that stops recording when the speaker pauses names, as
+`pause_param`, the parameter saying how long a pause ends the take, in
+milliseconds; `listen(pause_ms=...)` and `vox self-report --pause-ms` then
+send it under that spelling, a contract without one sends nothing, and no
+value given leaves the engine's own default. `vox.adapters.joe` names joe's.
+
 `tests/test_contract.py` runs the whole closed loop against a contract that
 shares no path, no parameter name and no response key with the default. That
 test is the claim: a seam that only works one way fails it.

@@ -36,6 +36,7 @@ ALIEN = EngineContract(
     devices_key="inputs",
     available_key="has_input",
     conversation="/dialogue/state",
+    pause_param="hush",
 )
 
 
@@ -54,6 +55,7 @@ def test_the_alien_contract_shares_nothing_with_the_default():
         "devices_key",
         "available_key",
         "conversation",
+        "pause_param",
     ):
         assert getattr(ALIEN, field) != getattr(default, field), field
 
@@ -108,6 +110,27 @@ def test_listen_reads_this_contract_s_keys(engine):
     assert path.endswith("capture.wav")
 
 
+def test_a_pause_travels_in_this_contract_s_spelling_or_not_at_all(engine):
+    """On the alien contract the parameter is `hush`; the default names none,
+    and the engine then sees no pause however the caller asked.
+
+    Seen to fail by having the engine read `silence_ms` rather than
+    `contract.pause_param`: the alien engine recorded None where 1200 was
+    sent.
+    """
+    base_url, state, _, contract = engine
+
+    with HttpSTT(base_url, contract=contract) as stt:
+        stt.listen(duration=2, pause_ms=1200)
+
+    if contract.pause_param:
+        assert state.pauses == [1200]
+        assert f"{contract.pause_param}=1200" in state.requests[0]
+    else:
+        assert state.pauses == [None]
+        assert "1200" not in state.requests[0]
+
+
 def test_devices_reads_this_contract_s_keys(engine):
     base_url, _, _, contract = engine
 
@@ -139,14 +162,15 @@ def test_the_default_contract_is_not_secretly_the_alien_one(engine):
 
 def test_the_named_adapter_matches_the_default_today(engine):
     """`JOE` is written out in full and equals the defaults, apart from the
-    conversation route, which the default leaves unset because not every
-    engine has one.
+    conversation route and the pause parameter, which the default leaves
+    unset because not every engine has them.
 
     Stated as a test rather than a comment so that the day one of them moves,
     something says so instead of the two quietly drifting.
     """
-    assert replace(JOE, conversation=None) == EngineContract()
+    assert replace(JOE, conversation=None, pause_param=None) == EngineContract()
     assert JOE.conversation == "/api/voice/conversation"
+    assert JOE.pause_param == "silence_ms"
 
 
 def test_an_announcement_travels_the_contract_s_own_route(engine):

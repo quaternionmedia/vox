@@ -143,6 +143,37 @@ def test_self_report_live_refuses_without_a_microphone():
     fake_stt.listen.assert_not_called()
 
 
+def test_self_report_live_passes_pause_ms_to_the_backend(monkeypatch, tmp_path):
+    """`--pause-ms` reaches `listen` as `pause_ms`; the contract spells it from there.
+
+    Seen to fail by leaving `pause_ms` out of the `self_report_live` call in
+    `cli.self_report`: `listen` was called with `duration` alone.
+    """
+    monkeypatch.chdir(tmp_path)  # `recording` writes under the working directory
+    fake_stt = _fake_stt(microphone_available=True, listen=("ship it", "cap.wav"))
+
+    with patch("vox.cli.HttpSTT", return_value=fake_stt):
+        result = runner.invoke(
+            cli.app, ["self-report", "--pause-ms", "1500", "--voice", "recording"]
+        )
+
+    assert result.exit_code == 0, result.output
+    fake_stt.listen.assert_called_once_with(duration=5.0, pause_ms=1500)
+    assert "Heard:      ship it" in result.output
+
+
+def test_self_report_live_leaves_the_pause_to_the_engine_by_default(monkeypatch, tmp_path):
+    """No `--pause-ms` means no preference, and the engine's own default stands."""
+    monkeypatch.chdir(tmp_path)
+    fake_stt = _fake_stt(microphone_available=True, listen=("ship it", "cap.wav"))
+
+    with patch("vox.cli.HttpSTT", return_value=fake_stt):
+        result = runner.invoke(cli.app, ["self-report", "--voice", "recording"])
+
+    assert result.exit_code == 0, result.output
+    fake_stt.listen.assert_called_once_with(duration=5.0, pause_ms=None)
+
+
 # ─── loop ─────────────────────────────────────────────────────────────────────
 
 def test_loop_offline_closes_without_an_engine_or_hardware(tmp_path):

@@ -6,6 +6,7 @@ Usage:
     uv run vox loop                       # the same loop against a real engine
     uv run vox self-report clip.wav       # transcribe an existing file, then speak it back
     uv run vox self-report --duration 5   # record from the engine's mic, then speak it back
+    uv run vox self-report --pause-ms 1500  # and let a longer pause end the take
 
 `--engine` and `--voice` each name a module in `vox.adapters`; nothing here
 is wired to a particular one, and `--url` overrides where the engine listens.
@@ -123,6 +124,12 @@ def doctor(engine: str = ENGINE, url: str = URL, voice: str = VOICE):
 def self_report(
     filename: str = typer.Argument(None, help="Audio file the engine can already resolve"),
     duration: float = typer.Option(5.0, help="Seconds to record if no filename is given"),
+    pause_ms: int = typer.Option(
+        None,
+        "--pause-ms",
+        help="Milliseconds of silence that end the recording early, on an engine that stops "
+        "when the speaker does; omitted, the engine's own default stands",
+    ),
     engine: str = ENGINE,
     url: str = URL,
     voice: str = VOICE,
@@ -143,7 +150,7 @@ def self_report(
         result = (
             session.self_report_file(filename)
             if filename
-            else session.self_report_live(duration=duration)
+            else session.self_report_live(duration=duration, pause_ms=pause_ms)
         )
 
     typer.echo(f"Heard:      {result.transcript}")
