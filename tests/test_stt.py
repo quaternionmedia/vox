@@ -242,3 +242,74 @@ def test_it_leaves_a_client_it_was_given_alone():
         pass
     assert not client.is_closed
     client.close()
+
+
+# --- answered over a question -----------------------------------------------------
+
+
+def test_watch_posts_the_listen_s_parameters_briefly():
+    """Mutation: open the watch without the listen's parameters -- red."""
+    from vox.adapters import JOE
+
+    client = MagicMock()
+    client.post.return_value = MagicMock(status_code=200)
+    stt = _stt_with(client, contract=JOE, timeout=60.0)
+
+    assert stt.watch(5.0, pause_ms=800, hint=["approve", "hold"]) is True
+    client.post.assert_called_once_with(
+        "http://127.0.0.1:8000/api/voice/watch",
+        params={"duration": 5.0, "silence_ms": 800, "hint": "approve, hold"},
+        timeout=2.0,
+    )
+
+
+def test_unwatch_posts_and_neither_raises_when_the_engine_is_away():
+    from vox.adapters import JOE
+
+    client = MagicMock()
+    client.post.return_value = MagicMock(status_code=200)
+    assert _stt_with(client, contract=JOE).unwatch() is True
+    assert client.post.call_args.args == ("http://127.0.0.1:8000/api/voice/unwatch",)
+
+    client.post.side_effect = httpx.ConnectError("refused")
+    stt = _stt_with(client, contract=JOE)
+    assert stt.watch(5.0) is False and stt.unwatch() is False
+
+
+def test_watching_does_nothing_on_a_contract_without_the_routes():
+    client = MagicMock()
+    stt = _stt_with(client)
+
+    assert stt.watch(5.0) is False and stt.unwatch() is False and stt.interrupted() is False
+    client.post.assert_not_called()
+    client.get.assert_not_called()
+
+
+def test_interrupted_reads_the_engine_s_report_briefly():
+    from vox.adapters import JOE
+
+    client = MagicMock()
+    client.get.return_value = _fake_response({"interrupted": True, "held": False})
+    client.get.return_value.status_code = 200
+    stt = _stt_with(client, contract=JOE, timeout=60.0)
+
+    assert stt.interrupted() is True
+    client.get.assert_called_once_with("http://127.0.0.1:8000/api/voice/control", timeout=0.5)
+
+
+def test_interrupted_is_false_whenever_the_engine_cannot_say():
+    """A question is never cut short on a guess. Mutation: answer True when
+    the engine cannot be asked -- red."""
+    from vox.adapters import JOE
+
+    client = MagicMock()
+    stt = _stt_with(client, contract=JOE)
+
+    client.get.side_effect = httpx.ConnectError("refused")
+    assert stt.interrupted() is False
+    client.get.side_effect = None
+    client.get.return_value = MagicMock(status_code=404)
+    assert stt.interrupted() is False
+    client.get.return_value = MagicMock(status_code=200)
+    client.get.return_value.json.side_effect = ValueError("not JSON")
+    assert stt.interrupted() is False

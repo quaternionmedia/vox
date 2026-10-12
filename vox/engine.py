@@ -140,6 +140,15 @@ class EngineState:
     engine returns `heard` whatever it is hinted; recording the hint is how a
     test sees it arrived."""
 
+    interrupted: bool = False
+    """What the contract's `control` route reports under `interrupted_key`:
+    the test's script for a person who answered over the question."""
+
+    watches: list[dict | None] = field(default_factory=list)
+    """Every watch opened, as the parameters it carried, and None for each
+    one closed, in order. The engine has no microphone to open early, so a
+    watch changes nothing it does; recording it is how a test sees it arrived."""
+
 
 class _Handler(BaseHTTPRequestHandler):
     state: EngineState
@@ -174,6 +183,8 @@ class _Handler(BaseHTTPRequestHandler):
         elif route.path == contract.devices:
             devices = self._devices()
             self._send(200, {contract.devices_key: devices, contract.available_key: bool(devices)})
+        elif contract.control and route.path == contract.control:
+            self._send(200, {contract.interrupted_key: self.state.interrupted})
         else:
             self._send(404, {"detail": "Not Found"})
 
@@ -205,6 +216,12 @@ class _Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
             self.state.announced.append(json.loads(self.rfile.read(length) or b"{}"))
             self._send(200, {})
+        elif contract.watch and route.path == contract.watch:
+            self.state.watches.append({name: values[0] for name, values in query.items()})
+            self._send(200, {"watching": True})
+        elif contract.unwatch and route.path == contract.unwatch:
+            self.state.watches.append(None)
+            self._send(200, {"watching": False})
         else:
             self._send(404, {"detail": "Not Found"})
 

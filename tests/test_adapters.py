@@ -238,3 +238,101 @@ def test_the_joe_adapter_names_the_hint_parameter():
     from vox.adapters import JOE
 
     assert JOE.hint_param == "hint"
+
+
+class _Playing:
+    """A SAPI voice still playing for `blocks` polls, then done."""
+
+    def __init__(self, blocks):
+        self.blocks = blocks
+        self.polls = 0
+
+    def __call__(self, ms):
+        self.polls += 1
+        return self.polls > self.blocks
+
+
+def test_on_sapi_a_sentence_stops_as_soon_as_until_says_so(monkeypatch, tmp_path):
+    """Mutation: never stop -- red, the voice talks over the answer."""
+    fake = _sapi_installed(monkeypatch)
+    asked = iter([False, True])
+    tts = Pyttsx3TTS(out_dir=str(tmp_path))
+
+    def playing(voice):
+        voice.WaitUntilDone.side_effect = _Playing(blocks=10)
+
+    real = fake.CreateObject
+
+    def create(progid):
+        made = real(progid)
+        if progid == "SAPI.SpVoice":
+            playing(made)
+        return made
+
+    fake.CreateObject = create
+    tts.speak("Run in qmcp: deploy. Approve or hold?", until=lambda: next(asked))
+
+    player = fake.voices[1]
+    player.SpeakStream.assert_called_once_with(fake.streams[1], pyttsx3_adapter.SVSF_ASYNC)
+    player.Speak.assert_called_once_with("", pyttsx3_adapter.SVSF_ASYNC | pyttsx3_adapter.SVSF_PURGE)
+    assert tts.cut is True
+    fake.streams[1].Close.assert_called_once()
+
+
+def test_on_sapi_a_sentence_nobody_interrupts_plays_to_the_end(monkeypatch, tmp_path):
+    fake = _sapi_installed(monkeypatch)
+    tts = Pyttsx3TTS(out_dir=str(tmp_path))
+    real = fake.CreateObject
+
+    def create(progid):
+        made = real(progid)
+        if progid == "SAPI.SpVoice":
+            made.WaitUntilDone.side_effect = _Playing(blocks=3)
+        return made
+
+    fake.CreateObject = create
+    tts.speak("Approve or hold?", until=lambda: False)
+
+    player = fake.voices[1]
+    player.Speak.assert_not_called()
+    assert player.WaitUntilDone.call_count == 4 and tts.cut is False
+
+
+def test_on_sapi_an_until_that_fails_never_cuts_the_sentence(monkeypatch, tmp_path):
+    """Mutation: take a failing check as a stop -- red."""
+    fake = _sapi_installed(monkeypatch)
+    tts = Pyttsx3TTS(out_dir=str(tmp_path))
+    real = fake.CreateObject
+
+    def create(progid):
+        made = real(progid)
+        if progid == "SAPI.SpVoice":
+            made.WaitUntilDone.side_effect = _Playing(blocks=2)
+        return made
+
+    def broken():
+        raise RuntimeError("the engine went away")
+
+    fake.CreateObject = create
+    tts.speak("Approve or hold?", until=broken)
+
+    fake.voices[1].Speak.assert_not_called()
+    assert tts.cut is False
+
+
+def test_on_sapi_without_until_the_sentence_is_played_synchronously_and_not_cut(monkeypatch, tmp_path):
+    fake = _sapi_installed(monkeypatch)
+    tts = Pyttsx3TTS(out_dir=str(tmp_path))
+
+    tts.speak("hi")
+
+    fake.voices[1].SpeakStream.assert_called_once_with(fake.streams[1], 0)
+    fake.voices[1].WaitUntilDone.assert_not_called()
+    assert tts.cut is False
+
+
+def test_the_joe_adapter_names_its_watch_and_control():
+    from vox.adapters import JOE
+
+    assert (JOE.watch, JOE.unwatch, JOE.control, JOE.interrupted_key) == (
+        "/api/voice/watch", "/api/voice/unwatch", "/api/voice/control", "interrupted")

@@ -19,6 +19,9 @@ from vox.contract import EngineContract
 # Seconds an announcement may take. It feeds a display, and a question that
 # waits on one has its priorities the wrong way round.
 ANNOUNCE_TIMEOUT = 2.0
+# Seconds asking whether a question was interrupted may take. It is asked
+# every tenth of a second while the question is said.
+CONTROL_TIMEOUT = 0.5
 
 
 class SpeechToText(Protocol):
@@ -113,14 +116,9 @@ class HttpSTT:
         for, and an engine that has one keeps its own default when the caller
         states no preference. `hint` travels the same way under `hint_param`,
         its words joined with commas."""
-        params: dict = {self.contract.duration_param: duration}
-        if self.contract.pause_param and pause_ms is not None:
-            params[self.contract.pause_param] = pause_ms
-        if self.contract.hint_param and hint:
-            params[self.contract.hint_param] = ", ".join(hint)
         resp = self.client.post(
             self._url(self.contract.listen),
-            params=params,
+            params=self._listen_params(duration, pause_ms, hint),
             timeout=self.timeout + duration,
         )
         resp.raise_for_status()
@@ -128,6 +126,58 @@ class HttpSTT:
         reported = data.get(self.contract.confidence_key) if self.contract.confidence_key else None
         self.last_confidence = float(reported) if isinstance(reported, (int, float)) else None
         return data[self.contract.text_key], data[self.contract.audio_path_key]
+
+    def _listen_params(self, duration: float, pause_ms: int | None,
+                       hint: Sequence[str] | None) -> dict:
+        params: dict = {self.contract.duration_param: duration}
+        if self.contract.pause_param and pause_ms is not None:
+            params[self.contract.pause_param] = pause_ms
+        if self.contract.hint_param and hint:
+            params[self.contract.hint_param] = ", ".join(hint)
+        return params
+
+    def watch(self, duration: float = 5.0, *, pause_ms: int | None = None,
+              hint: Sequence[str] | None = None) -> bool:
+        """Open a take before a question is asked, so an answer said over the
+        question is heard from its first word; the next `listen` returns it.
+        Takes `listen`'s parameters. Returns whether the engine took it, never
+        raises, and waits briefly: a question that cannot be watched is still
+        asked, and answered once it ends."""
+        if not self.contract.watch:
+            return False
+        try:
+            resp = self.client.post(
+                self._url(self.contract.watch), params=self._listen_params(duration, pause_ms, hint),
+                timeout=min(self.timeout, ANNOUNCE_TIMEOUT),
+            )
+            return resp.status_code < 400
+        except httpx.HTTPError:
+            return False
+
+    def unwatch(self) -> bool:
+        """Close a watch that will not be listened to. Never raises."""
+        if not self.contract.unwatch:
+            return False
+        try:
+            resp = self.client.post(self._url(self.contract.unwatch),
+                                    timeout=min(self.timeout, ANNOUNCE_TIMEOUT))
+            return resp.status_code < 400
+        except httpx.HTTPError:
+            return False
+
+    def interrupted(self) -> bool:
+        """Whether the person has interrupted the question being asked, as
+        the engine reports under `interrupted_key`. False on a contract with
+        no `control` route and whenever the engine cannot be asked: a question
+        is never cut short on a guess."""
+        if not self.contract.control:
+            return False
+        try:
+            resp = self.client.get(self._url(self.contract.control),
+                                   timeout=min(self.timeout, CONTROL_TIMEOUT))
+            return resp.status_code == 200 and bool(resp.json().get(self.contract.interrupted_key))
+        except (httpx.HTTPError, ValueError):
+            return False
 
     def devices(self) -> dict:
         """Audio input devices the engine's own machine can see.

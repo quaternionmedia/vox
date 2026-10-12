@@ -67,12 +67,12 @@ class EngineContract:
     """Where the transcript sits in a transcribe or listen response."""
 
     audio_path_key: str = "audio_path"
+    """Where a listen response names the file it recorded."""
 
     confidence_key: str | None = None
     """Where a listen response says how sure the engine is of its transcript,
     from 0 to 1. None for an engine that does not say; `HttpSTT.last_confidence`
     is then None, and a caller treats the transcript as unweighed."""
-    """Where a listen response names the file it recorded."""
 
     devices_key: str = "devices"
     available_key: str = "microphone_available"
@@ -83,6 +83,24 @@ class EngineContract:
     the question's `options` when it has them, so a display can offer them. None for an engine with no
     such surface, and announcing is then a no-op: watching is optional, and
     asking the question is not."""
+
+    watch: str | None = None
+    """Where a dialog opens a take before it asks a question, with the
+    parameters `listen` takes, so a person who answers over the question is
+    heard from their first word: the next `listen` returns that take, and a
+    take nobody began is dropped for a fresh one. None for an engine with no
+    such thing; `HttpSTT.watch` then does nothing."""
+
+    unwatch: str | None = None
+    """Where a dialog closes a watch it will not listen to."""
+
+    control: str | None = None
+    """Where an engine says, under `interrupted_key`, whether the person has
+    interrupted the question being asked -- answered by key, held a talk key,
+    or begun speaking over it -- so the question can stop. None for an engine
+    that cannot tell, and nothing is then interrupted."""
+
+    interrupted_key: str = "interrupted"
 
     def url(self, base: str, path: str) -> str:
         """Join a base URL to one of this contract's paths."""

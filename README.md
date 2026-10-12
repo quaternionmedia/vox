@@ -97,7 +97,8 @@ MINE = EngineContract(
 stt = HttpSTT("http://localhost:9000", contract=MINE)
 ```
 
-A synthesizer adapter is any object with `speak(text, out_path=None) -> str`.
+A synthesizer adapter is any object with `speak(text, out_path=None) -> str`;
+one that can be cut short also takes `until=`, a callable that says when to stop.
 
 An engine that shows the exchange to a person can name a `conversation`
 route. `HttpSTT.announce(state, text, reason=None)` then posts a dialog's own
@@ -123,6 +124,15 @@ An engine that weighs its transcripts names, as `confidence_key`, where a
 listen response says how sure it is, from 0 to 1; `HttpSTT.last_confidence`
 then holds it after each `listen`, and None when the contract names no such
 key or the engine reported none. `vox.adapters.joe` names joe's.
+
+An engine that can be answered over a question names `watch`, `unwatch` and
+`control` routes. `HttpSTT.watch(...)`, with `listen`'s parameters, opens a
+take before the question is asked, so an answer said over it is heard from its
+first word, and the next `listen` returns that take; `interrupted()` reads the
+engine's report under `interrupted_key` -- an answer by key, a held talk key,
+or speech over the question. `Pyttsx3TTS(...).speak(text, until=stt.interrupted)`
+then stops the voice the moment that turns true. A contract without the routes
+watches nothing and is never interrupted. `vox.adapters.joe` names joe's.
 
 The platform voice (`vox.adapters.pyttsx3`) is heard on the platform's default
 output unless told otherwise: `Pyttsx3TTS(output_device=...)` or
