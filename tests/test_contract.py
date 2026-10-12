@@ -38,6 +38,7 @@ ALIEN = EngineContract(
     conversation="/dialogue/state",
     pause_param="hush",
     hint_param="expect",
+    confidence_key="sureness",
 )
 
 
@@ -58,6 +59,7 @@ def test_the_alien_contract_shares_nothing_with_the_default():
         "conversation",
         "pause_param",
         "hint_param",
+        "confidence_key",
     ):
         assert getattr(ALIEN, field) != getattr(default, field), field
 
@@ -150,6 +152,22 @@ def test_a_hint_travels_in_this_contract_s_spelling_or_not_at_all(engine):
         assert "approve" not in state.requests[0]
 
 
+def test_a_confidence_is_read_in_this_contract_s_spelling_or_not_at_all(engine):
+    """Seen to fail by reading `confidence` rather than the contract's key: the
+    alien contract read None where 0.9 was reported."""
+    base_url, state, _, contract = engine
+    state.confidence = 0.9
+
+    with HttpSTT(base_url, contract=contract) as stt:
+        stt.listen(duration=2)
+        heard = stt.last_confidence
+        state.confidence = None
+        stt.listen(duration=2)
+
+    assert heard == (0.9 if contract.confidence_key else None)
+    assert stt.last_confidence is None  # a take with none reported is not the last one's
+
+
 def test_devices_reads_this_contract_s_keys(engine):
     base_url, _, _, contract = engine
 
@@ -187,7 +205,8 @@ def test_the_named_adapter_matches_the_default_today(engine):
     Stated as a test rather than a comment so that the day one of them moves,
     something says so instead of the two quietly drifting.
     """
-    assert replace(JOE, conversation=None, pause_param=None, hint_param=None) == EngineContract()
+    assert replace(JOE, conversation=None, pause_param=None, hint_param=None,
+                   confidence_key=None) == EngineContract()
     assert JOE.conversation == "/api/voice/conversation"
     assert JOE.pause_param == "silence_ms"
     assert JOE.hint_param == "hint"

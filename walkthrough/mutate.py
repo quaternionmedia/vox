@@ -194,6 +194,14 @@ MUTATIONS = [
         why="A fragment naming several outputs would play to whichever came first, which can be a jack nobody hears.",
     ),
     Mutation(
+        name="a listen's confidence is read under a fixed name",
+        path="vox/stt.py",
+        find="        reported = data.get(self.contract.confidence_key) if self.contract.confidence_key else None",
+        replace='        reported = data.get("confidence")',
+        catches="tests/test_contract.py::test_a_confidence_is_read_in_this_contract_s_spelling_or_not_at_all",
+        why="A caller deciding whether to ask for confirmation would read nothing from an engine that spells it differently, or something from one that never said.",
+    ),
+    Mutation(
         name="the engine accepts a pause the engine it stands in for refuses",
         path="vox/engine.py",
         find="        if pause is not None and not 100 <= pause <= 5000:",

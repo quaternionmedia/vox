@@ -67,6 +67,11 @@ class EngineContract:
     """Where the transcript sits in a transcribe or listen response."""
 
     audio_path_key: str = "audio_path"
+
+    confidence_key: str | None = None
+    """Where a listen response says how sure the engine is of its transcript,
+    from 0 to 1. None for an engine that does not say; `HttpSTT.last_confidence`
+    is then None, and a caller treats the transcript as unweighed."""
     """Where a listen response names the file it recorded."""
 
     devices_key: str = "devices"
