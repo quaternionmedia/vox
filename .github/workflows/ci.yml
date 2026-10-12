@@ -27,16 +27,16 @@ jobs:
 
       # An editable install resolves imports against the source tree, so a
       # subpackage the build never declared is importable in development and
-      # absent from the wheel. That shipped once here, and the suite could
-      # not have caught it: the suite runs against the editable install.
+      # absent from the wheel. The suite cannot see it, because it runs
+      # against the editable install.
       - name: the wheel contains the package
         run: uv run python walkthrough/check_wheel.py
 
   mutations:
     # Every guard in this repo, broken on purpose, checked for going red.
-    # Its own job because it runs the suite once per mutation and the local
-    # loop is meant to stay under ten seconds — so this rides CI rather than
-    # `pytest`, and the drift check below is what keeps the record honest.
+    # Its own job: it runs a test once per mutation, too slow for the local
+    # `pytest` loop, so it rides CI, and the drift check below keeps the
+    # record current.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

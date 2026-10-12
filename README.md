@@ -30,7 +30,7 @@ mic/file --> speech engine (STT over HTTP) --> transcript --> vox TTS --> audio 
 ```sh
 uv sync --extra dev
 uv run pytest                 # tests and the walkthrough; no mic, speaker or engine needed
-uv run vox loop --offline     # the whole closed loop, about two thirds of a second
+uv run vox loop --offline     # the whole closed loop, with no engine or hardware
 
 # against a real engine, once one is running:
 uv run vox doctor                         # engine reachable, a mic, synthesis works
@@ -56,9 +56,8 @@ said.wav --> engine --> "approve the deploy" --> TTS --> echo.wav --> engine -->
 
 `--offline` runs it against `vox.engine`, a real HTTP server on a port the OS
 picks, answering whichever contract it was handed. No model download, no
-microphone, no speakers, and the same bytes every run — so the loop is
-something a test can assert on and a change can be checked against in seconds
-rather than three terminals.
+microphone, no speakers, and the same bytes every run, so a test can assert
+on the loop. *The offline engine* below says what it holds a caller to.
 
 **It is a codec, not a voice.** `vox.engine` carries text through a real WAV
 file faithfully, which proves the seam and proves nothing about transcription
@@ -75,11 +74,9 @@ is not deterministic. Both are worth running; they are different questions.
 
 `formant` is a small formant synthesizer in pure Python: audible speech-like
 audio for any text, on any machine, with nothing to install. **Whisper does
-not read it** — measured against a live engine, where it returned empty
-while real synthesis through the identical path came back exactly. It is for
-hearing what a loop said on a machine with no system voice, not for closing
-a loop through transcription. `vox.synth.SPEECH_IS_NOT_TRANSCRIBABLE` says
-so next to the measurement.
+not read it.** It is for hearing what a loop said on a machine with no system
+voice, not for closing a loop through transcription.
+`vox.synth.SPEECH_IS_NOT_TRANSCRIBABLE` states it, for a caller to branch on.
 
 Closing the loop through a real engine needs `pyttsx3` or another real
 voice, which is the default.
@@ -97,7 +94,8 @@ MINE = EngineContract(
 stt = HttpSTT("http://localhost:9000", contract=MINE)
 ```
 
-A synthesizer adapter is any object with `speak(text, out_path=None) -> str`.
+A synthesizer adapter is any object with `speak(text, out_path=None) -> str`;
+one that can be cut short also takes `until=`, a callable that says when to stop.
 
 An engine that shows the exchange to a person can name a `conversation`
 route. `HttpSTT.announce(state, text, reason=None)` then posts a dialog's own
@@ -106,9 +104,76 @@ raises: a display that cannot be told is no reason for a question to go
 unasked. On a contract without the route, announcing does nothing.
 `vox.adapters.joe` names joe's.
 
+An engine that stops recording when the speaker pauses names, as
+`pause_param`, the parameter saying how long a pause ends the take, in
+milliseconds; `listen(pause_ms=...)` and `vox self-report --pause-ms` then
+send it under that spelling, a contract without one sends nothing, and no
+value given leaves the engine's own default. `vox.adapters.joe` names joe's.
+
+An engine that can bias its transcription toward expected words names, as
+`hint_param`, the parameter carrying them; `listen(hint=["approve", "hold"])`
+then sends them comma-separated, and a contract without one sends nothing. A
+hint biases and never constrains. `announce(..., options=[...])` puts the same
+words in a `speaking` state, in the order the question says them, so a display
+can offer each as a control. `vox.adapters.joe` names joe's.
+
+An engine that weighs its transcripts names, as `confidence_key`, where a
+listen response says how sure it is, from 0 to 1; `HttpSTT.last_confidence`
+then holds it after each `listen`, and None when the contract names no such
+key or the engine reported none. `vox.adapters.joe` names joe's.
+
+An engine that can be answered over a question names `watch`, `unwatch` and
+`control` routes. `HttpSTT.watch(...)`, with `listen`'s parameters, opens a
+take before the question is asked, so an answer said over it is heard from its
+first word, and the next `listen` returns that take; `interrupted()` reads the
+engine's report under `interrupted_key` -- an answer by key, a held talk key,
+or speech over the question. `Pyttsx3TTS(...).speak(text, until=stt.interrupted)`
+then stops the voice the moment that turns true. A contract without the routes
+watches nothing and is never interrupted. `vox.adapters.joe` names joe's.
+
+The platform voice (`vox.adapters.pyttsx3`) is heard on the platform's default
+output unless told otherwise: `Pyttsx3TTS(output_device=...)` or
+`VOX_OUTPUT_DEVICE` names another by a fragment of its name, and a fragment
+matching none or several is refused. `vox outputs` lists the names and `vox say
+"testing" --output <fragment>` says something on one, to find the output a
+person actually hears. On Windows the adapter drives SAPI directly, writing
+the sentence to a WAV and playing that file to the end, rather than relying
+on pyttsx3's own playback.
+
+`HttpSTT` holds one `httpx.Client` for its life, because building a client
+costs far more than a request to a local engine. Close it with `close()` or
+use it as a context manager; a client passed in is the caller's to close.
+
 `tests/test_contract.py` runs the whole closed loop against a contract that
-shares no path, no parameter name and no response key with the default. That
-test is the claim: a seam that only works one way fails it.
+shares no path, no parameter name and no response key with the default, so a
+seam that only works one way fails it.
+
+## The offline engine
+
+`vox.engine` answers whichever `EngineContract` it is given, and holds a
+caller to what the engine it stands in for refuses, so a defect in a caller
+fails the offline suite rather than a live run:
+
+- **It binds a port the OS picks** and reports it; a fixed port can be
+  another program's server.
+- **It says what it is.** Its health body carries `"engine": "vox.engine"`
+  beside `status`, so a caller can tell it from a real engine left running.
+- **It refuses a name that leaves its directories.** A `transcribe` filename
+  resolving outside every audio directory is answered 404, as for a missing
+  file.
+- **It refuses audio it did not write.** `decode_wav` reads only WAVs
+  `encode_wav` wrote, marked with `VOX1`, and raises
+  `NotVoxAudioError` for anything else.
+- **It holds the bounds of the engine it stands in for.** A `listen` duration
+  outside `0 < duration <= 60` is answered 400; when the contract names a
+  pause parameter, a pause outside `100..5000` milliseconds is answered 400
+  under that contract's spelling. A duration or pause that does not parse is
+  answered 422, and a `listen` with no microphone 503. `tests/test_engine_contract.py` names the joe
+  commit each bound was read at.
+- **It records what arrived.** `EngineState` keeps every request served, and
+  the pauses, hints, announcements and watches each one carried, for a test
+  to assert on; the engine itself has no speaker to wait for and no
+  microphone to open early.
 
 ## What runs, and what it records
 

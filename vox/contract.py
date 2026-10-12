@@ -3,19 +3,13 @@
 `EngineContract` is the set of paths, parameters and response keys an HTTP
 speech engine must answer with. It is a value: a caller constructs a
 different one, and every part of vox — the client, the session, the
-deterministic engine, the walkthrough — works against it unchanged. A seam
-that names one engine is a coupling with extra steps, and a class per engine
-is what that coupling looks like.
+deterministic engine, the walkthrough — works against it unchanged, with no
+class per engine.
 
-The defaults have to be some engine's spelling. They are one engine's because
-one had to be first, not because it is special; `vox.adapters.joe` names that
-engine, and naming it is the whole of that module's job.
-
-**The claim is only as good as its test.** A default that is the only value
-ever exercised is a hardcoding with a longer spelling, so
-`tests/test_contract.py` runs the whole closed loop against a contract
-sharing no path, no parameter name and no response key with the default. A
-seam that works one way fails it.
+The defaults are one engine's spelling, and `vox.adapters.joe` names that
+engine. `tests/test_contract.py` runs the whole closed loop against a
+contract sharing no path, no parameter name and no response key with the
+default, so a part of vox that reads a default spelling directly fails it.
 """
 
 from __future__ import annotations
@@ -41,10 +35,27 @@ class EngineContract:
     """Transcribes a file the engine can already see, named by `filename_param`."""
 
     listen: str = "/api/voice/listen"
-    """Records for `duration_param` seconds and transcribes what it heard."""
+    """Records up to `duration_param` seconds and transcribes what it heard."""
 
     filename_param: str = "filename"
     duration_param: str = "duration"
+
+    pause_param: str | None = None
+    """The parameter naming how long a pause ends the take, in milliseconds.
+    `duration_param` is then the cap and the recording stops this long after
+    the speaker does, so a closed-choice answer takes the engine's short
+    default and a sentence-length instruction, with pauses mid-thought, asks
+    for a longer one. None for an engine that records a fixed window and has
+    no such thing; `listen(pause_ms=...)` then sends nothing."""
+
+    hint_param: str | None = None
+    """The parameter naming the words a short answer is expected to be,
+    comma-separated, for an engine that can bias its transcription toward
+    them: told "approve, hold", a clipped "approve" is likelier to come back
+    as that word. A hint biases and never constrains -- the engine still
+    returns what it heard, and the caller still decides what that means.
+    None for an engine with no such thing; `listen(hint=...)` then sends
+    nothing."""
 
     text_key: str = "text"
     """Where the transcript sits in a transcribe or listen response."""
@@ -52,14 +63,38 @@ class EngineContract:
     audio_path_key: str = "audio_path"
     """Where a listen response names the file it recorded."""
 
+    confidence_key: str | None = None
+    """Where a listen response says how sure the engine is of its transcript,
+    from 0 to 1. None for an engine that does not say; `HttpSTT.last_confidence`
+    is then None, and a caller treats the transcript as unweighed."""
+
     devices_key: str = "devices"
     available_key: str = "microphone_available"
 
     conversation: str | None = None
     """Where a dialog posts its own states -- `speaking`, `recorded`, `gave_up`,
-    `idle` -- for anything watching the exchange. None for an engine with no
+    `idle` -- for anything watching the exchange, a `speaking` state carrying
+    the question's `options` when it has them, so a display can offer them. None for an engine with no
     such surface, and announcing is then a no-op: watching is optional, and
     asking the question is not."""
+
+    watch: str | None = None
+    """Where a dialog opens a take before it asks a question, with the
+    parameters `listen` takes, so a person who answers over the question is
+    heard from their first word: the next `listen` returns that take, and a
+    take nobody began is dropped for a fresh one. None for an engine with no
+    such thing; `HttpSTT.watch` then does nothing."""
+
+    unwatch: str | None = None
+    """Where a dialog closes a watch it will not listen to."""
+
+    control: str | None = None
+    """Where an engine says, under `interrupted_key`, whether the person has
+    interrupted the question being asked -- answered by key, held a talk key,
+    or begun speaking over it -- so the question can stop. None for an engine
+    that cannot tell, and nothing is then interrupted."""
+
+    interrupted_key: str = "interrupted"
 
     def url(self, base: str, path: str) -> str:
         """Join a base URL to one of this contract's paths."""

@@ -9,15 +9,19 @@ Which engine is not this module's business. `HttpSTT` takes an
 different engine is a value passed in, not a class written.
 """
 
+from collections.abc import Sequence
 from typing import Protocol
 
 import httpx
 
 from vox.contract import EngineContract
 
-# Seconds an announcement may take. It feeds a display, and a question that
-# waits on one has its priorities the wrong way round.
+# Seconds an announcement may take. It feeds a display, and a question never
+# waits long on one.
 ANNOUNCE_TIMEOUT = 2.0
+# Seconds asking whether a question was interrupted may take. It is asked
+# every tenth of a second while the question is said.
+CONTROL_TIMEOUT = 0.5
 
 
 class SpeechToText(Protocol):
@@ -27,8 +31,15 @@ class SpeechToText(Protocol):
         """Transcribe an audio file the backend can already see. Returns the text."""
         ...
 
-    def listen(self, duration: float = 5.0) -> tuple[str, str]:
-        """Capture `duration` seconds live and transcribe it. Returns (text, audio_path)."""
+    def listen(self, duration: float = 5.0, *, pause_ms: int | None = None,
+               hint: Sequence[str] | None = None) -> tuple[str, str]:
+        """Capture up to `duration` seconds live and transcribe it. Returns (text, audio_path).
+
+        `pause_ms` is how long a pause ends the take early, for a backend
+        that stops when the speaker does. None leaves the backend's default.
+        `hint` is the words a short answer is expected to be, for a backend
+        that can bias toward them; None or empty states no expectation.
+        """
         ...
 
 
@@ -36,14 +47,9 @@ class HttpSTT:
     """Speech-to-text over HTTP, against any engine matching an `EngineContract`.
 
     One `httpx.Client` is held for the life of the instance and reused by
-    every call. That is not tidiness: `httpx.get`/`httpx.post` at module
-    level construct a fresh `Client` per call, and constructing one costs
-    **~620 ms on the workstation this was measured on** — ~240 ms of it
-    `ssl.create_default_context(cafile=certifi.where())`, paid whether or
-    not the URL is `https`. A closed loop makes three of these calls, so the
-    module-level form spent about two seconds per iteration doing nothing.
-    Measured 2026-09-27 against `vox.engine`; a reused client answers the
-    same request in ~10 ms.
+    every call. `httpx.get`/`httpx.post` at module level build a client per
+    call, each with an SSL context made whether or not the URL is `https`,
+    and building one costs far more than a request to a local engine.
 
     Close it with `close()`, or use the instance as a context manager. An
     `httpx.Client` passed in is the caller's to close.
@@ -61,6 +67,9 @@ class HttpSTT:
         self.timeout = timeout
         self._client = client
         self._owns_client = client is None
+        # How sure the engine was of the last `listen`'s transcript, 0 to 1, or
+        # None when its contract names no confidence or it reported none.
+        self.last_confidence: float | None = None
 
     @property
     def client(self) -> httpx.Client:
@@ -94,15 +103,76 @@ class HttpSTT:
         resp.raise_for_status()
         return resp.json()[self.contract.text_key]
 
-    def listen(self, duration: float = 5.0) -> tuple[str, str]:
+    def listen(self, duration: float = 5.0, *, pause_ms: int | None = None,
+               hint: Sequence[str] | None = None) -> tuple[str, str]:
+        """`pause_ms` is sent under the contract's `pause_param`, and only when
+        both the contract names one and a value was given: an engine that
+        records a fixed window is never handed a parameter it has no spelling
+        for, and an engine that has one keeps its own default when the caller
+        states no preference. `hint` travels the same way under `hint_param`,
+        its words joined with commas."""
         resp = self.client.post(
             self._url(self.contract.listen),
-            params={self.contract.duration_param: duration},
+            params=self._listen_params(duration, pause_ms, hint),
             timeout=self.timeout + duration,
         )
         resp.raise_for_status()
         data = resp.json()
+        reported = data.get(self.contract.confidence_key) if self.contract.confidence_key else None
+        self.last_confidence = float(reported) if isinstance(reported, (int, float)) else None
         return data[self.contract.text_key], data[self.contract.audio_path_key]
+
+    def _listen_params(self, duration: float, pause_ms: int | None,
+                       hint: Sequence[str] | None) -> dict:
+        params: dict = {self.contract.duration_param: duration}
+        if self.contract.pause_param and pause_ms is not None:
+            params[self.contract.pause_param] = pause_ms
+        if self.contract.hint_param and hint:
+            params[self.contract.hint_param] = ", ".join(hint)
+        return params
+
+    def watch(self, duration: float = 5.0, *, pause_ms: int | None = None,
+              hint: Sequence[str] | None = None) -> bool:
+        """Open a take before a question is asked, so an answer said over the
+        question is heard from its first word; the next `listen` returns it.
+        Takes `listen`'s parameters. Returns whether the engine took it, never
+        raises, and waits briefly: a question that cannot be watched is still
+        asked, and answered once it ends."""
+        if not self.contract.watch:
+            return False
+        try:
+            resp = self.client.post(
+                self._url(self.contract.watch), params=self._listen_params(duration, pause_ms, hint),
+                timeout=min(self.timeout, ANNOUNCE_TIMEOUT),
+            )
+            return resp.status_code < 400
+        except httpx.HTTPError:
+            return False
+
+    def unwatch(self) -> bool:
+        """Close a watch that will not be listened to. Never raises."""
+        if not self.contract.unwatch:
+            return False
+        try:
+            resp = self.client.post(self._url(self.contract.unwatch),
+                                    timeout=min(self.timeout, ANNOUNCE_TIMEOUT))
+            return resp.status_code < 400
+        except httpx.HTTPError:
+            return False
+
+    def interrupted(self) -> bool:
+        """Whether the person has interrupted the question being asked, as
+        the engine reports under `interrupted_key`. False on a contract with
+        no `control` route and whenever the engine cannot be asked: a question
+        is never cut short on a guess."""
+        if not self.contract.control:
+            return False
+        try:
+            resp = self.client.get(self._url(self.contract.control),
+                                   timeout=min(self.timeout, CONTROL_TIMEOUT))
+            return resp.status_code == 200 and bool(resp.json().get(self.contract.interrupted_key))
+        except (httpx.HTTPError, ValueError):
+            return False
 
     def devices(self) -> dict:
         """Audio input devices the engine's own machine can see.
@@ -128,17 +198,22 @@ class HttpSTT:
         """Read the availability flag without the caller knowing its key."""
         return bool(self.devices().get(self.contract.available_key))
 
-    def announce(self, state: str, text: str = "", reason: str | None = None) -> bool:
+    def announce(self, state: str, text: str = "", reason: str | None = None,
+                 options: Sequence[str] | None = None) -> bool:
         """Tell the engine what the dialog is doing, for anything watching.
 
-        Returns whether the engine took it. Never raises, and waits briefly: a
-        display that cannot be told is no reason for a question to go unasked.
+        `options` are the answers a question offers, in the order it says
+        them, so a display can offer each as a control. Returns whether the
+        engine took it. Never raises, and waits briefly: a display that cannot
+        be told is no reason for a question to go unasked.
         """
         if not self.contract.conversation:
             return False
-        body = {"state": state, "text": text}
+        body: dict = {"state": state, "text": text}
         if reason:
             body["reason"] = reason
+        if options:
+            body["options"] = list(options)
         try:
             resp = self.client.post(
                 self._url(self.contract.conversation), json=body,

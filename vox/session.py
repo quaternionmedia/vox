@@ -56,13 +56,12 @@ class VoiceSession:
         self.echo_dir = echo_dir
         """Directory the STT engine resolves filenames against, for `round_trip`.
 
-        Closing the loop means handing vox's own output back to the engine,
-        and `EngineContract` has the engine take a *filename it can already
-        see* rather than an upload. So the two have to share a filesystem,
-        which is true of the local development loop this is for and not true
-        of an engine on another host. An engine that accepts bytes would want
-        a different contract and a different session method; neither exists,
-        because nothing has needed one.
+        Closing the loop hands vox's own output back to the engine, and
+        `EngineContract` has the engine take a *filename it can already see*
+        rather than an upload. So the two share a filesystem: true of a local
+        development loop, not of an engine on another host. An engine that
+        accepts bytes needs a different contract and a different session
+        method, and vox has neither.
         """
 
     def self_report_file(self, filename: str) -> SelfReport:
@@ -78,9 +77,13 @@ class VoiceSession:
             output_audio_path=output_path,
         )
 
-    def self_report_live(self, duration: float = 5.0) -> SelfReport:
-        """Record from the mic (via the STT backend), then speak the transcript back."""
-        transcript, input_path = self.stt.listen(duration=duration)
+    def self_report_live(self, duration: float = 5.0, pause_ms: int | None = None) -> SelfReport:
+        """Record from the mic (via the STT backend), then speak the transcript back.
+
+        `pause_ms` goes to the backend as given; whether and how it reaches
+        the engine is the backend's contract to decide.
+        """
+        transcript, input_path = self.stt.listen(duration=duration, pause_ms=pause_ms)
         output_path = self.tts.speak(transcript)
         return SelfReport(
             transcript=transcript,
@@ -92,17 +95,9 @@ class VoiceSession:
         """Close the loop: transcribe, speak the transcript, transcribe that.
 
         `echo_as` is the name *the engine* will be asked for, resolved under
-        `echo_dir` on the way out.
-
-        **A bare filename, with no directory in it.** The default was
-        `out/echo.wav`, on the reasoning that an engine resolves a name
-        against its own directories and only requires the result to stay
-        inside them. That is not what engines do: the one vox was built
-        against refuses any name containing a separator, because accepting
-        one is how a path traversal gets in. The two were never exercised
-        together — this method had only ever run against vox's own engine,
-        which is laxer — so the default 404'd against the real thing on its
-        first run.
+        `echo_dir` on the way out. It is a bare filename, with no directory
+        in it: an engine may refuse any name containing a separator, as joe
+        does, because accepting one lets a path traversal in.
 
         The loop closing proves the seam carried the text; it does not prove
         the transcription was right. Both legs run through the same engine,

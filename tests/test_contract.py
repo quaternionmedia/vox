@@ -1,15 +1,8 @@
-"""Is the seam actually independent of any one engine, or does it just say so?
+"""Is the seam independent of any one engine, or does it only say so?
 
-vox used to have a single speech-to-text class named for the engine it
-talked to, with that engine's routes spelled inline. Replacing the name with
-`HttpSTT` and moving the paths into a dataclass changes nothing on its own —
-a default that is the only value ever used is a hardcoding with a longer
-spelling.
-
-So these run the whole thing against `ALIEN`, a contract that shares **no
-path, no parameter name and no response key** with the default. If any part
-of vox still reaches for the original spelling, they fail. That is the only
-form of this claim worth making.
+These run the whole thing against `ALIEN`, a contract that shares no path,
+no parameter name and no response key with the default. A part of vox that
+reaches for the default spelling directly fails them.
 """
 
 from dataclasses import replace
@@ -36,6 +29,13 @@ ALIEN = EngineContract(
     devices_key="inputs",
     available_key="has_input",
     conversation="/dialogue/state",
+    pause_param="hush",
+    hint_param="expect",
+    confidence_key="sureness",
+    watch="/v2/stt/early",
+    unwatch="/v2/stt/early/close",
+    control="/v2/turn",
+    interrupted_key="cut_in",
 )
 
 
@@ -54,6 +54,13 @@ def test_the_alien_contract_shares_nothing_with_the_default():
         "devices_key",
         "available_key",
         "conversation",
+        "pause_param",
+        "hint_param",
+        "confidence_key",
+        "watch",
+        "unwatch",
+        "control",
+        "interrupted_key",
     ):
         assert getattr(ALIEN, field) != getattr(default, field), field
 
@@ -108,6 +115,60 @@ def test_listen_reads_this_contract_s_keys(engine):
     assert path.endswith("capture.wav")
 
 
+def test_a_pause_travels_in_this_contract_s_spelling_or_not_at_all(engine):
+    """On the alien contract the parameter is `hush`; the default names none,
+    and the engine then sees no pause however the caller asked.
+
+    Seen to fail by having the engine read `silence_ms` rather than
+    `contract.pause_param`: the alien engine recorded None where 1200 was
+    sent.
+    """
+    base_url, state, _, contract = engine
+
+    with HttpSTT(base_url, contract=contract) as stt:
+        stt.listen(duration=2, pause_ms=1200)
+
+    if contract.pause_param:
+        assert state.pauses == [1200]
+        assert f"{contract.pause_param}=1200" in state.requests[0]
+    else:
+        assert state.pauses == [None]
+        assert "1200" not in state.requests[0]
+
+
+def test_a_hint_travels_in_this_contract_s_spelling_or_not_at_all(engine):
+    """Seen to fail by having the engine read `hint` rather than
+    `contract.hint_param`: the alien engine recorded None where the words
+    were sent."""
+    base_url, state, _, contract = engine
+
+    with HttpSTT(base_url, contract=contract) as stt:
+        stt.listen(duration=2, hint=["approve", "hold"])
+        stt.listen(duration=2)
+
+    if contract.hint_param:
+        assert state.hints == ["approve, hold", None]
+    else:
+        assert state.hints == [None, None]
+        assert "approve" not in state.requests[0]
+
+
+def test_a_confidence_is_read_in_this_contract_s_spelling_or_not_at_all(engine):
+    """Seen to fail by reading `confidence` rather than the contract's key: the
+    alien contract read None where 0.9 was reported."""
+    base_url, state, _, contract = engine
+    state.confidence = 0.9
+
+    with HttpSTT(base_url, contract=contract) as stt:
+        stt.listen(duration=2)
+        heard = stt.last_confidence
+        state.confidence = None
+        stt.listen(duration=2)
+
+    assert heard == (0.9 if contract.confidence_key else None)
+    assert stt.last_confidence is None  # a take with none reported is not the last one's
+
+
 def test_devices_reads_this_contract_s_keys(engine):
     base_url, _, _, contract = engine
 
@@ -139,14 +200,16 @@ def test_the_default_contract_is_not_secretly_the_alien_one(engine):
 
 def test_the_named_adapter_matches_the_default_today(engine):
     """`JOE` is written out in full and equals the defaults, apart from the
-    conversation route, which the default leaves unset because not every
-    engine has one.
+    optional routes and keys, which the default leaves unset because not
+    every engine has them.
 
-    Stated as a test rather than a comment so that the day one of them moves,
-    something says so instead of the two quietly drifting.
+    A test rather than a comment, so a change to either says so.
     """
-    assert replace(JOE, conversation=None) == EngineContract()
+    assert replace(JOE, conversation=None, pause_param=None, hint_param=None,
+                   confidence_key=None, watch=None, unwatch=None, control=None) == EngineContract()
     assert JOE.conversation == "/api/voice/conversation"
+    assert JOE.pause_param == "silence_ms"
+    assert JOE.hint_param == "hint"
 
 
 def test_an_announcement_travels_the_contract_s_own_route(engine):
@@ -164,3 +227,35 @@ def test_an_announcement_travels_the_contract_s_own_route(engine):
     else:
         assert took is False
         assert state.announced == [] and state.requests == []
+
+
+def test_a_watch_travels_the_contract_s_own_route_or_not_at_all(engine):
+    """With the listen's parameters in the contract's spelling; on a contract
+    without the route, nothing is sent."""
+    base_url, state, _, contract = engine
+
+    with HttpSTT(base_url, contract=contract) as stt:
+        opened = stt.watch(3, pause_ms=600, hint=["approve", "hold"])
+        closed = stt.unwatch()
+
+    if contract.watch:
+        assert opened is True and closed is True
+        assert state.watches == [{contract.duration_param: "3", contract.pause_param: "600",
+                                  contract.hint_param: "approve, hold"}, None]
+    else:
+        assert opened is False and closed is False
+        assert state.watches == [] and state.requests == []
+
+
+def test_an_interruption_is_read_in_this_contract_s_spelling_or_not_at_all(engine):
+    """Seen to fail by reading `interrupted` rather than the contract's key:
+    the alien contract was never interrupted."""
+    base_url, state, _, contract = engine
+
+    with HttpSTT(base_url, contract=contract) as stt:
+        state.interrupted = True
+        cut = stt.interrupted()
+        state.interrupted = False
+        uncut = stt.interrupted()
+
+    assert cut is bool(contract.control) and uncut is False

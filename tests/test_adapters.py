@@ -9,8 +9,12 @@ wanted a different engine would be installing this one anyway.
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import vox
+from vox.adapters import pyttsx3 as pyttsx3_adapter
 from vox.adapters.pyttsx3 import Pyttsx3TTS
+
 
 
 def test_speak_writes_to_generated_path_and_drives_engine(tmp_path):
@@ -28,12 +32,10 @@ def test_speak_writes_to_generated_path_and_drives_engine(tmp_path):
 
 
 def test_speak_is_audible_and_returns_only_after_the_audio_ends(tmp_path):
-    """The finding this pins: `save_to_file` writes a WAV and plays nothing,
-    so a live loop spoke into a file while the human sat in silence — and
-    then opened the microphone. Speaking means being heard, and the order
-    matters: the say happens after the file is complete, and `speak` returns
-    only after the final `runAndWait`, so a caller that listens next cannot
-    talk over its own prompt."""
+    """`save_to_file` writes a WAV and plays nothing, so `speak` also says
+    the text. The order matters: the say happens after the file is complete,
+    and `speak` returns only after the final `runAndWait`, so a caller that
+    listens next cannot talk over its own prompt."""
     fake_pyttsx3 = MagicMock()
     fake_engine = MagicMock()
     fake_pyttsx3.init.return_value = fake_engine
@@ -76,6 +78,103 @@ def test_speak_respects_explicit_out_path(tmp_path):
     fake_engine.save_to_file.assert_called_once_with("hi", explicit_path)
 
 
+# ─── SAPI, driven directly on Windows ─────────────────────────────────────────
+
+
+class _Token:
+    def __init__(self, name):
+        self.name = name
+
+    def GetDescription(self):  # noqa: N802 -- SAPI's spelling
+        return self.name
+
+
+class _FakeSapi:
+    """`comtypes.client` standing in for SAPI: voices and file streams, recorded."""
+
+    OUTPUTS = ("Realtek HD Audio 2nd output", "Speakers (Realtek(R) Audio)", "Headphones (USB Audio)")
+
+    def __init__(self):
+        self.voices, self.streams = [], []
+
+    def CreateObject(self, progid):  # noqa: N802 -- comtypes' spelling
+        if progid == "SAPI.SpVoice":
+            voice = MagicMock()
+            voice.GetAudioOutputs.return_value = [_Token(n) for n in self.OUTPUTS]
+            voice.AudioOutput = None
+            self.voices.append(voice)
+            return voice
+        stream = MagicMock()
+        self.streams.append(stream)
+        return stream
+
+
+def _sapi_installed(monkeypatch):
+    fake = _FakeSapi()
+    comtypes = MagicMock()
+    comtypes.client = fake
+    monkeypatch.setitem(sys.modules, "comtypes", comtypes)
+    monkeypatch.setitem(sys.modules, "comtypes.client", fake)
+    monkeypatch.setattr(pyttsx3_adapter, "_sapi", lambda: True)
+    return fake
+
+
+def test_on_sapi_the_file_is_written_then_played_synchronously(monkeypatch, tmp_path):
+    """Mutation: play with pyttsx3's `say` instead -- red, nothing reaches
+    `SpeakStream`."""
+    fake = _sapi_installed(monkeypatch)
+
+    out_path = Pyttsx3TTS(out_dir=str(tmp_path)).speak("Anything else?")
+
+    writer, player = fake.voices
+    writer.Speak.assert_called_once_with("Anything else?", 0)
+    assert writer.AudioOutputStream is fake.streams[0]
+    fake.streams[0].Open.assert_called_once_with(out_path, pyttsx3_adapter.SSFM_CREATE_FOR_WRITE)
+    fake.streams[1].Open.assert_called_once_with(out_path, pyttsx3_adapter.SSFM_OPEN_FOR_READ)
+    player.SpeakStream.assert_called_once_with(fake.streams[1], 0)
+    assert player.AudioOutput is None  # the platform default
+
+
+def test_on_sapi_a_named_output_is_the_one_played_to(monkeypatch, tmp_path):
+    fake = _sapi_installed(monkeypatch)
+
+    Pyttsx3TTS(out_dir=str(tmp_path), output_device="speakers").speak("hi")
+
+    assert fake.voices[1].AudioOutput.GetDescription() == "Speakers (Realtek(R) Audio)"
+
+
+def test_on_sapi_vox_output_device_names_it_when_no_argument_does(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOX_OUTPUT_DEVICE", "headphones")
+    fake = _sapi_installed(monkeypatch)
+
+    Pyttsx3TTS(out_dir=str(tmp_path)).speak("hi")
+
+    assert fake.voices[1].AudioOutput.GetDescription() == "Headphones (USB Audio)"
+
+
+def test_on_sapi_an_output_matching_several_or_none_is_refused(monkeypatch, tmp_path):
+    """Mutation: take the first match -- red, "realtek" would pick a jack nobody hears."""
+    _sapi_installed(monkeypatch)
+
+    for fragment in ("realtek", "monitor"):
+        with pytest.raises(ValueError, match=f"output '{fragment}' matches"):
+            Pyttsx3TTS(out_dir=str(tmp_path), output_device=fragment).speak("hi")
+
+
+def test_on_sapi_playback_off_writes_the_file_and_plays_nothing(monkeypatch, tmp_path):
+    fake = _sapi_installed(monkeypatch)
+
+    Pyttsx3TTS(out_dir=str(tmp_path), playback=False).speak("hi")
+
+    assert len(fake.voices) == 1 and len(fake.streams) == 1
+
+
+def test_on_sapi_the_outputs_are_listed_by_name(monkeypatch):
+    _sapi_installed(monkeypatch)
+
+    assert pyttsx3_adapter.outputs() == list(_FakeSapi.OUTPUTS)
+
+
 # ─── the line between the seam and the adapters ───────────────────────────────
 
 def test_importing_vox_pulls_in_no_adapter():
@@ -113,3 +212,125 @@ def test_an_adapter_is_reachable_when_asked_for():
     from vox.adapters import JOE
 
     assert JOE.transcribe.startswith("/")
+
+
+def test_the_joe_adapter_names_the_pause_parameter():
+    """joe ends a take `silence_ms` after the speaker stops; the adapter is
+    where that spelling lives, and nowhere above it.
+
+    Seen to fail by leaving `pause_param` off `JOE`: it read None.
+    """
+    from vox.adapters import JOE
+
+    assert JOE.pause_param == "silence_ms"
+
+
+def test_the_joe_adapter_names_its_confidence():
+    from vox.adapters import JOE
+
+    assert JOE.confidence_key == "confidence"
+
+
+def test_the_joe_adapter_names_the_hint_parameter():
+    """Seen to fail by leaving `hint_param` off `JOE`: it read None."""
+    from vox.adapters import JOE
+
+    assert JOE.hint_param == "hint"
+
+
+class _Playing:
+    """A SAPI voice still playing for `blocks` polls, then done."""
+
+    def __init__(self, blocks):
+        self.blocks = blocks
+        self.polls = 0
+
+    def __call__(self, ms):
+        self.polls += 1
+        return self.polls > self.blocks
+
+
+def test_on_sapi_a_sentence_stops_as_soon_as_until_says_so(monkeypatch, tmp_path):
+    """Mutation: never stop -- red, the voice talks over the answer."""
+    fake = _sapi_installed(monkeypatch)
+    asked = iter([False, True])
+    tts = Pyttsx3TTS(out_dir=str(tmp_path))
+
+    def playing(voice):
+        voice.WaitUntilDone.side_effect = _Playing(blocks=10)
+
+    real = fake.CreateObject
+
+    def create(progid):
+        made = real(progid)
+        if progid == "SAPI.SpVoice":
+            playing(made)
+        return made
+
+    fake.CreateObject = create
+    tts.speak("Run in qmcp: deploy. Approve or hold?", until=lambda: next(asked))
+
+    player = fake.voices[1]
+    player.SpeakStream.assert_called_once_with(fake.streams[1], pyttsx3_adapter.SVSF_ASYNC)
+    player.Speak.assert_called_once_with("", pyttsx3_adapter.SVSF_ASYNC | pyttsx3_adapter.SVSF_PURGE)
+    assert tts.cut is True
+    fake.streams[1].Close.assert_called_once()
+
+
+def test_on_sapi_a_sentence_nobody_interrupts_plays_to_the_end(monkeypatch, tmp_path):
+    fake = _sapi_installed(monkeypatch)
+    tts = Pyttsx3TTS(out_dir=str(tmp_path))
+    real = fake.CreateObject
+
+    def create(progid):
+        made = real(progid)
+        if progid == "SAPI.SpVoice":
+            made.WaitUntilDone.side_effect = _Playing(blocks=3)
+        return made
+
+    fake.CreateObject = create
+    tts.speak("Approve or hold?", until=lambda: False)
+
+    player = fake.voices[1]
+    player.Speak.assert_not_called()
+    assert player.WaitUntilDone.call_count == 4 and tts.cut is False
+
+
+def test_on_sapi_an_until_that_fails_never_cuts_the_sentence(monkeypatch, tmp_path):
+    """Mutation: take a failing check as a stop -- red."""
+    fake = _sapi_installed(monkeypatch)
+    tts = Pyttsx3TTS(out_dir=str(tmp_path))
+    real = fake.CreateObject
+
+    def create(progid):
+        made = real(progid)
+        if progid == "SAPI.SpVoice":
+            made.WaitUntilDone.side_effect = _Playing(blocks=2)
+        return made
+
+    def broken():
+        raise RuntimeError("the engine went away")
+
+    fake.CreateObject = create
+    tts.speak("Approve or hold?", until=broken)
+
+    fake.voices[1].Speak.assert_not_called()
+    assert tts.cut is False
+
+
+def test_on_sapi_without_until_the_sentence_is_played_synchronously_and_not_cut(monkeypatch, tmp_path):
+    fake = _sapi_installed(monkeypatch)
+    tts = Pyttsx3TTS(out_dir=str(tmp_path))
+
+    tts.speak("hi")
+
+    fake.voices[1].SpeakStream.assert_called_once_with(fake.streams[1], 0)
+    fake.voices[1].WaitUntilDone.assert_not_called()
+    assert tts.cut is False
+
+
+def test_the_joe_adapter_names_its_watch_and_control():
+    from vox.adapters import JOE
+
+    assert (JOE.watch, JOE.unwatch, JOE.control, JOE.interrupted_key) == (
+        "/api/voice/watch", "/api/voice/unwatch", "/api/voice/control", "interrupted")

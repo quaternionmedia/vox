@@ -1,9 +1,8 @@
 """Break each guard on purpose, and check it goes red.
 
-A check is evidence only after it has been seen to fail. Reading one tells
-you what its author meant, not what it catches — and this repository has
-the shape that produces inert tests: a stand-in engine, a codec, and a
-suite that was entirely mocks a day ago.
+A check is evidence only after it has been seen to fail: reading one says
+what it was meant to catch, not what it catches. This repository has the
+shape that produces inert tests: a stand-in engine and a codec.
 
 Each entry below names a guard, the one-line change that should defeat it,
 and the test that must fail when it does. Running this applies each change,
@@ -138,12 +137,132 @@ MUTATIONS = [
         why="One sound for every phrase. The determinism test passes perfectly against it, which is why that test is not enough on its own.",
     ),
     Mutation(
-        name="every call builds its own client again",
+        name="the client drops the pause it was asked to send",
+        path="vox/stt.py",
+        find="        if self.contract.pause_param and pause_ms is not None:\n            params[self.contract.pause_param] = pause_ms",
+        replace="        pass",
+        catches="tests/test_stt.py::test_listen_sends_the_pause_when_the_contract_names_it_and_a_value_is_given",
+        why="A caller asking for a longer pause would get the engine's default and a sentence-length answer cut off mid-thought, with nothing failing.",
+    ),
+    Mutation(
+        name="the client sends the pause whether or not the contract names it",
+        path="vox/stt.py",
+        find="        if self.contract.pause_param and pause_ms is not None:\n            params[self.contract.pause_param] = pause_ms",
+        replace='        if pause_ms is not None:\n            params[self.contract.pause_param or "pause_ms"] = pause_ms',
+        catches="tests/test_stt.py::test_listen_sends_no_pause_on_a_contract_without_one",
+        why="An engine with no such parameter would be sent one under a name it never agreed to, and the seam would hardcode a spelling.",
+    ),
+    Mutation(
+        name="the client drops the hint it was asked to send",
+        path="vox/stt.py",
+        find="        if self.contract.hint_param and hint:\n            params[self.contract.hint_param] = \", \".join(hint)",
+        replace="        pass",
+        catches="tests/test_contract.py::test_a_hint_travels_in_this_contract_s_spelling_or_not_at_all",
+        why="A short answer would be transcribed with no idea of the words it should be, and nothing would fail.",
+    ),
+    Mutation(
+        name="the client sends the hint whether or not the contract names it",
+        path="vox/stt.py",
+        find="        if self.contract.hint_param and hint:\n            params[self.contract.hint_param] = \", \".join(hint)",
+        replace='        if hint:\n            params[self.contract.hint_param or "hint"] = ", ".join(hint)',
+        catches="tests/test_contract.py::test_a_hint_travels_in_this_contract_s_spelling_or_not_at_all",
+        why="An engine with no such parameter would be sent one under a name it never agreed to.",
+    ),
+    Mutation(
+        name="an announcement drops the question's options",
+        path="vox/stt.py",
+        find='        if options:\n            body["options"] = list(options)',
+        replace="        pass",
+        catches="tests/test_stt.py::test_announce_carries_a_question_s_options_in_the_order_given",
+        why="A display could no longer offer the answers as controls, so a person who cannot be heard has no other way to answer.",
+    ),
+    Mutation(
+        name="the SAPI path plays through pyttsx3's say",
+        path="vox/adapters/pyttsx3.py",
+        find="        if _sapi():\n            self.cut = _sapi_speak(text, out_path, self.playback, self.output_device, until)\n            return out_path\n",
+        replace="",
+        catches="tests/test_adapters.py::test_on_sapi_the_file_is_written_then_played_synchronously",
+        why="On Windows a sentence would be played through pyttsx3's say instead of SAPI's synchronous SpeakStream, and speak could return before it had been heard.",
+    ),
+    Mutation(
+        name="a named output that matches several is guessed",
+        path="vox/adapters/pyttsx3.py",
+        find="    if len(matches) != 1:",
+        replace="    if not matches:",
+        catches="tests/test_adapters.py::test_on_sapi_an_output_matching_several_or_none_is_refused",
+        why="A fragment naming several outputs would play to whichever came first, which can be a jack nobody hears.",
+    ),
+    Mutation(
+        name="a listen's confidence is read under a fixed name",
+        path="vox/stt.py",
+        find="        reported = data.get(self.contract.confidence_key) if self.contract.confidence_key else None",
+        replace='        reported = data.get("confidence")',
+        catches="tests/test_contract.py::test_a_confidence_is_read_in_this_contract_s_spelling_or_not_at_all",
+        why="A caller deciding whether to ask for confirmation would read nothing from an engine that spells it differently, or something from one that never said.",
+    ),
+    Mutation(
+        name="the engine accepts a pause the engine it stands in for refuses",
+        path="vox/engine.py",
+        find="        if pause is not None and not 100 <= pause <= 5000:",
+        replace="        if False:",
+        catches="tests/test_engine_contract.py::test_listen_refuses_a_silence_ms_joe_refuses",
+        why="A caller sending a pause outside the real engine's bounds would pass the offline suite and be answered 400 at the demo, which is the drift the stand-in exists to prevent.",
+    ),
+    Mutation(
+        name="the engine refuses the pauses at the edges of the bound it stands in for",
+        path="vox/engine.py",
+        find="        if pause is not None and not 100 <= pause <= 5000:",
+        replace="        if pause is not None and not 100 < pause < 5000:",
+        catches="tests/test_engine_contract.py::test_listen_accepts_the_pauses_at_the_edges_of_joes_bound",
+        why="Every refusal case still passes against an exclusive bound; only a test sending the edges themselves tells an inclusive bound from one off by one.",
+    ),
+    Mutation(
+        name="every call builds its own client",
         path="vox/stt.py",
         find="        if self._client is None:\n            self._client = httpx.Client(timeout=self.timeout)\n        return self._client",
         replace="        return httpx.Client(timeout=self.timeout)",
         catches="tests/test_stt.py::test_one_client_serves_every_call",
-        why="Nothing breaks — the loop just costs ~620 ms per call again. A regression with no symptom except slowness is the kind nobody notices.",
+        why="Nothing breaks: each call pays for a new client and its SSL context, and the loop slows with no other symptom.",
+    ),
+    Mutation(
+        name="a question is never cut short",
+        path="vox/adapters/pyttsx3.py",
+        find="            if _asked(until):",
+        replace="            if False:",
+        catches="tests/test_adapters.py::test_on_sapi_a_sentence_stops_as_soon_as_until_says_so",
+        why="A person who answers before the question ends is talked over, and the answer waits for a voice that has stopped mattering.",
+    ),
+    Mutation(
+        name="a failing check stops the question",
+        path="vox/adapters/pyttsx3.py",
+        find="    except Exception:  # noqa: BLE001 -- a check that fails never cuts a sentence\n        return False",
+        replace="    except Exception:  # noqa: BLE001 -- a check that fails never cuts a sentence\n        return True",
+        catches="tests/test_adapters.py::test_on_sapi_an_until_that_fails_never_cuts_the_sentence",
+        why="An engine that goes away mid-question would cut every question short, and the consent would never be heard in full.",
+    ),
+    Mutation(
+        name="an interruption is read under a fixed name",
+        path="vox/stt.py",
+        find="            return resp.status_code == 200 and bool(resp.json().get(self.contract.interrupted_key))",
+        replace='            return resp.status_code == 200 and bool(resp.json().get("interrupted"))',
+        catches="tests/test_contract.py::test_an_interruption_is_read_in_this_contract_s_spelling_or_not_at_all",
+        why="An engine that spells it differently could never stop a question, however the person answered.",
+    ),
+    Mutation(
+        name="a watch is opened without the listen's parameters",
+        path="vox/stt.py",
+        find="                self._url(self.contract.watch), params=self._listen_params(duration, pause_ms, hint),",
+        replace="                self._url(self.contract.watch), params={},",
+        catches="tests/test_stt.py::test_watch_posts_the_listen_s_parameters_briefly",
+        why="The take opened over the question would be transcribed without the answer's hint and ended on the engine's default pause.",
+    ),
+    Mutation(
+        name="an engine that cannot be asked is taken as an interruption",
+        path="vox/stt.py",
+        find="        except (httpx.HTTPError, ValueError):\n            return False\n\n    def devices",
+        replace="        except (httpx.HTTPError, ValueError):\n            return True\n\n    def devices",
+        catches="tests/test_stt.py::test_interrupted_is_false_whenever_the_engine_cannot_say",
+        why="A question would be cut short on a guess whenever the engine stalled.",
     ),
 ]
 
@@ -171,10 +290,9 @@ def main() -> int:
     for mutation in MUTATIONS:
         target = ROOT / mutation.path
         # Bytes, not text, on both sides. `write_text` translates newlines to
-        # the platform separator, so restoring a LF file on Windows put CRLF
-        # back and left four source files reported as modified by a harness
-        # whose whole job is to leave no trace. The content was identical every
-        # time, which is why a check comparing content missed it.
+        # the platform separator, so an LF file restored through it on Windows
+        # comes back as CRLF: the same content, different bytes, and the file
+        # reported modified.
         original = target.read_bytes()
         source = original.decode("utf-8").replace("\r\n", "\n")
         if mutation.find not in source:
@@ -186,10 +304,9 @@ def main() -> int:
             result = _run(mutation.catches)
         finally:
             target.write_bytes(original)
-            # Assert the restore rather than trusting it. This harness edits
-            # tracked source, so "put it back" is the one thing it must never
-            # get quietly wrong — and the previous version got it wrong for
-            # every LF file on this platform without anything noticing.
+            # Assert the restore rather than trusting it: this harness edits
+            # tracked source, so a restore that is not byte-for-byte stops the
+            # run.
             if target.read_bytes() != original:
                 raise SystemExit(f"{mutation.path} was not restored byte-for-byte; check `git diff`")
 

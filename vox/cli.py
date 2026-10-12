@@ -6,6 +6,7 @@ Usage:
     uv run vox loop                       # the same loop against a real engine
     uv run vox self-report clip.wav       # transcribe an existing file, then speak it back
     uv run vox self-report --duration 5   # record from the engine's mic, then speak it back
+    uv run vox self-report --pause-ms 1500  # and let a longer pause end the take
 
 `--engine` and `--voice` each name a module in `vox.adapters`; nothing here
 is wired to a particular one, and `--url` overrides where the engine listens.
@@ -70,6 +71,35 @@ def _synthesizer(voice: str):
         raise typer.Exit(2) from None
 
 
+@app.command("outputs")
+def list_outputs():
+    """The audio outputs the platform voice can play to, by name.
+
+    Pass a fragment of one to `vox say --output`, or set `VOX_OUTPUT_DEVICE`,
+    when the default output is not the one a person hears.
+    """
+    from vox.adapters.pyttsx3 import outputs
+
+    names = outputs()
+    if not names:
+        typer.echo("The platform default output is used; this platform does not list them.")
+        return
+    for name in names:
+        typer.echo(name)
+
+
+@app.command("say")
+def say(text: str, output: str = typer.Option(None, help="A fragment of the output's name; default: VOX_OUTPUT_DEVICE, else the platform default")):
+    """Say `text` aloud through the platform voice, to hear which output carries it."""
+    from vox.adapters.pyttsx3 import Pyttsx3TTS
+
+    try:
+        Pyttsx3TTS(output_device=output).speak(text)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from None
+
+
 @app.command("doctor")
 def doctor(engine: str = ENGINE, url: str = URL, voice: str = VOICE):
     """Check whether a live demo can run: engine reachable, a mic, local synthesis.
@@ -106,9 +136,9 @@ def doctor(engine: str = ENGINE, url: str = URL, voice: str = VOICE):
         typer.echo(f"[ok]   text-to-speech: {voice} synthesizes")
     except typer.Exit:
         # `_synthesizer` refusing an unknown name is a usage error, not a
-        # broken audio stack. `typer.Exit` is not a `SystemExit`, so catching
-        # the latter here let the refusal fall through to the handler below
-        # and be reported as a synthesis failure with the wrong exit code.
+        # broken audio stack, and leaves with its own exit code. `typer.Exit`
+        # is not a `SystemExit`: catching `SystemExit` here would not stop the
+        # handler below from reporting the refusal as a synthesis failure.
         raise
     except Exception as exc:
         ok = False
@@ -123,6 +153,12 @@ def doctor(engine: str = ENGINE, url: str = URL, voice: str = VOICE):
 def self_report(
     filename: str = typer.Argument(None, help="Audio file the engine can already resolve"),
     duration: float = typer.Option(5.0, help="Seconds to record if no filename is given"),
+    pause_ms: int = typer.Option(
+        None,
+        "--pause-ms",
+        help="Milliseconds of silence that end the recording early, on an engine that stops "
+        "when the speaker does; omitted, the engine's own default stands",
+    ),
     engine: str = ENGINE,
     url: str = URL,
     voice: str = VOICE,
@@ -143,7 +179,7 @@ def self_report(
         result = (
             session.self_report_file(filename)
             if filename
-            else session.self_report_live(duration=duration)
+            else session.self_report_live(duration=duration, pause_ms=pause_ms)
         )
 
     typer.echo(f"Heard:      {result.transcript}")
@@ -190,17 +226,15 @@ def loop(
         else:
             typer.echo(f"engine:     {base_url} ({engine})")
 
-        # **THE INPUT IS SYNTHESIZED, IN BOTH MODES, BY THE BACKEND THAT WILL
-        # SPEAK THE ECHO.** Only the offline branch wrote `said.wav` before,
-        # so `vox loop` against a real engine transcribed a file nothing had
-        # created and died on a 404. Using one backend for both legs also
-        # makes the comparison mean something: the same voice goes out and
-        # comes back.
+        # The input is synthesized, in both modes, by the backend that speaks
+        # the echo: `said.wav` exists before the engine is asked for it, and
+        # the same voice goes out and comes back.
         tts.speak(say, out_path=str(Path(echo_dir) / "said.wav"))
 
         stt = stack.enter_context(HttpSTT(base_url, contract=contract))
-        # Ask what is listening before believing anything measured against it:
-        # a 200 proves something is there, not that it is the right something.
+        # Refuse to run against an engine that does not answer its health
+        # route. A 200 proves something is there, not that it is the right
+        # something; the output above names the URL and the adapter.
         if not stt.reachable():
             typer.echo(f"[fail] nothing answering at {base_url} -- run `vox doctor`.", err=True)
             raise typer.Exit(1)
