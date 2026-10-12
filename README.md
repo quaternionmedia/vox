@@ -112,6 +112,13 @@ milliseconds; `listen(pause_ms=...)` and `vox self-report --pause-ms` then
 send it under that spelling, a contract without one sends nothing, and no
 value given leaves the engine's own default. `vox.adapters.joe` names joe's.
 
+An engine that can bias its transcription toward expected words names, as
+`hint_param`, the parameter carrying them; `listen(hint=["approve", "hold"])`
+then sends them comma-separated, and a contract without one sends nothing. A
+hint biases and never constrains. `announce(..., options=[...])` puts the same
+words in a `speaking` state, in the order the question says them, so a display
+can offer each as a control. `vox.adapters.joe` names joe's.
+
 `tests/test_contract.py` runs the whole closed loop against a contract that
 shares no path, no parameter name and no response key with the default. That
 test is the claim: a seam that only works one way fails it.

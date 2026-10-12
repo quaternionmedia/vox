@@ -54,6 +54,15 @@ class EngineContract:
     for a longer one. None for an engine that records a fixed window and has
     no such thing; `listen(pause_ms=...)` then sends nothing."""
 
+    hint_param: str | None = None
+    """The parameter naming the words a short answer is expected to be,
+    comma-separated, for an engine that can bias its transcription toward
+    them: told "approve, hold", a clipped "approve" is likelier to come back
+    as that word. A hint biases and never constrains -- the engine still
+    returns what it heard, and the caller still decides what that means.
+    None for an engine with no such thing; `listen(hint=...)` then sends
+    nothing."""
+
     text_key: str = "text"
     """Where the transcript sits in a transcribe or listen response."""
 
@@ -65,7 +74,8 @@ class EngineContract:
 
     conversation: str | None = None
     """Where a dialog posts its own states -- `speaking`, `recorded`, `gave_up`,
-    `idle` -- for anything watching the exchange. None for an engine with no
+    `idle` -- for anything watching the exchange, a `speaking` state carrying
+    the question's `options` when it has them, so a display can offer them. None for an engine with no
     such surface, and announcing is then a no-op: watching is optional, and
     asking the question is not."""
 

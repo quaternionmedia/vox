@@ -162,6 +162,24 @@ def test_announce_posts_the_state_to_the_conversation_route_briefly():
     )
 
 
+def test_announce_carries_a_question_s_options_in_the_order_given():
+    """Seen to fail by dropping `options` from the body: the display has
+    nothing to offer."""
+    from vox.adapters import JOE
+
+    client = MagicMock()
+    client.post.return_value = MagicMock(status_code=200)
+    stt = _stt_with(client, contract=JOE)
+
+    stt.announce("speaking", "Say approve or hold.", options=("approve", "hold"))
+    stt.announce("speaking", "What should be done?")
+
+    first, second = (c.kwargs["json"] for c in client.post.call_args_list)
+    assert first == {"state": "speaking", "text": "Say approve or hold.",
+                     "options": ["approve", "hold"]}
+    assert "options" not in second
+
+
 def test_announce_does_nothing_on_a_contract_without_the_route():
     client = MagicMock()
     stt = _stt_with(client)

@@ -124,3 +124,10 @@ def test_the_joe_adapter_names_the_pause_parameter():
     from vox.adapters import JOE
 
     assert JOE.pause_param == "silence_ms"
+
+
+def test_the_joe_adapter_names_the_hint_parameter():
+    """Seen to fail by leaving `hint_param` off `JOE`: it read None."""
+    from vox.adapters import JOE
+
+    assert JOE.hint_param == "hint"

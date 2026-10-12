@@ -9,6 +9,7 @@ Which engine is not this module's business. `HttpSTT` takes an
 different engine is a value passed in, not a class written.
 """
 
+from collections.abc import Sequence
 from typing import Protocol
 
 import httpx
@@ -27,11 +28,14 @@ class SpeechToText(Protocol):
         """Transcribe an audio file the backend can already see. Returns the text."""
         ...
 
-    def listen(self, duration: float = 5.0, *, pause_ms: int | None = None) -> tuple[str, str]:
+    def listen(self, duration: float = 5.0, *, pause_ms: int | None = None,
+               hint: Sequence[str] | None = None) -> tuple[str, str]:
         """Capture up to `duration` seconds live and transcribe it. Returns (text, audio_path).
 
         `pause_ms` is how long a pause ends the take early, for a backend
         that stops when the speaker does. None leaves the backend's default.
+        `hint` is the words a short answer is expected to be, for a backend
+        that can bias toward them; None or empty states no expectation.
         """
         ...
 
@@ -98,15 +102,19 @@ class HttpSTT:
         resp.raise_for_status()
         return resp.json()[self.contract.text_key]
 
-    def listen(self, duration: float = 5.0, *, pause_ms: int | None = None) -> tuple[str, str]:
+    def listen(self, duration: float = 5.0, *, pause_ms: int | None = None,
+               hint: Sequence[str] | None = None) -> tuple[str, str]:
         """`pause_ms` is sent under the contract's `pause_param`, and only when
         both the contract names one and a value was given: an engine that
         records a fixed window is never handed a parameter it has no spelling
         for, and an engine that has one keeps its own default when the caller
-        states no preference."""
+        states no preference. `hint` travels the same way under `hint_param`,
+        its words joined with commas."""
         params: dict = {self.contract.duration_param: duration}
         if self.contract.pause_param and pause_ms is not None:
             params[self.contract.pause_param] = pause_ms
+        if self.contract.hint_param and hint:
+            params[self.contract.hint_param] = ", ".join(hint)
         resp = self.client.post(
             self._url(self.contract.listen),
             params=params,
@@ -140,17 +148,22 @@ class HttpSTT:
         """Read the availability flag without the caller knowing its key."""
         return bool(self.devices().get(self.contract.available_key))
 
-    def announce(self, state: str, text: str = "", reason: str | None = None) -> bool:
+    def announce(self, state: str, text: str = "", reason: str | None = None,
+                 options: Sequence[str] | None = None) -> bool:
         """Tell the engine what the dialog is doing, for anything watching.
 
-        Returns whether the engine took it. Never raises, and waits briefly: a
-        display that cannot be told is no reason for a question to go unasked.
+        `options` are the answers a question offers, in the order it says
+        them, so a display can offer each as a control. Returns whether the
+        engine took it. Never raises, and waits briefly: a display that cannot
+        be told is no reason for a question to go unasked.
         """
         if not self.contract.conversation:
             return False
-        body = {"state": state, "text": text}
+        body: dict = {"state": state, "text": text}
         if reason:
             body["reason"] = reason
+        if options:
+            body["options"] = list(options)
         try:
             resp = self.client.post(
                 self._url(self.contract.conversation), json=body,
