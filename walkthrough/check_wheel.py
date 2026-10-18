@@ -7,8 +7,9 @@ subpackage the wheel leaves out. This reads the wheel's own manifest.
 
     uv run python walkthrough/check_wheel.py
 
-Exits 1 and names what is missing. It builds into a temporary directory and
-leaves nothing behind.
+Exits 1 and names what is missing. The wheel is built into a temporary
+directory and goes with it. setuptools' `build/` and `vox.egg-info/` stay in
+the checkout, both ignored by git, and are cleared before the next build.
 """
 
 from __future__ import annotations
