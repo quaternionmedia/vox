@@ -5,11 +5,12 @@ sends text out through a real WAV file, reads it back through the engine's
 HTTP contract, and writes what happened to `walkthrough/closed-loop.md`.
 
 The artifact is **recorded, not compared**: this file rewrites it on every
-run, so it cannot drift from the behaviour it describes. Nothing asserts it
-against a golden copy, because a golden copy is a second place the
-behaviour is written down. Its content is deterministic by construction —
-no port, no clock, no duration — so a run that changes nothing leaves the
-file unchanged and a run that changes something shows it in the diff.
+run, and nothing in the suite asserts it against a golden copy, because a
+golden copy is a second place the behaviour is written down. Its content is
+deterministic by construction — no port, no clock, no duration — so a run
+that changes nothing leaves the file unchanged and a run that changes
+something shows it in the diff. CI fails on that diff
+(`.github/workflows/ci.yml`) until the rewritten file is committed.
 """
 
 from pathlib import Path
@@ -107,9 +108,10 @@ def test_it_records_what_happened(loop):
         f"""# The closed loop, as it ran
 
 Recorded by `walkthrough/test_closed_loop.py` on every `uv run pytest`.
-Do not edit: the next test run overwrites it. Nothing compares this file
-against anything, so it cannot go stale and it cannot fail — if it is
-wrong, the walkthrough is wrong.
+Do not edit: the next test run overwrites it. No test compares it with a
+stored copy, but CI does: after the suite rewrites it, CI fails if it
+differs from the copy committed, so a change in what happened is a diff to
+commit with the change. If this page is wrong, the walkthrough is wrong.
 
 ## What went round
 

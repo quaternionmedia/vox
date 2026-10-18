@@ -1,9 +1,10 @@
 # The media surface, as it ran
 
 Recorded by `walkthrough/test_media_engine.py` on every `uv run pytest`.
-Do not edit: the next test run overwrites it. Nothing compares this file
-against anything, so it cannot go stale and it cannot fail -- if it is
-wrong, the walkthrough is wrong.
+Do not edit: the next test run overwrites it. No test compares it with a
+stored copy, but CI does: after the suite rewrites it, CI fails if it
+differs from the copy committed, so a change in what happened is a diff to
+commit with the change. If this page is wrong, the walkthrough is wrong.
 
 ## What went up
 
