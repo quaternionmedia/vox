@@ -383,9 +383,10 @@ def test_close_sends_nothing_on_a_contract_whose_uploads_only_expire():
 JOE_ID = "0f3c2a9be1d84c6f9a7e5b4d3c2b1a09"
 
 # The answers joe's media routes give, in the shapes its `api.py` and
-# `Modules/Media.py` write them (`feat/video-audio-engine`): a 201 for an
-# upload, a 204 with no body for a delete, a segment's text trimmed and each
-# word's leading space kept, and capabilities that also state its limits.
+# `Modules/Media.py` write them on `feat/video-audio-engine` at `4ec1424`:
+# a 201 for an upload, a 204 with no body for a delete, a segment's text
+# trimmed and each word's leading space kept, and capabilities that also
+# state its limits.
 JOE_ANSWERS = {
     ("POST", "/api/media"): (201, {"media_id": JOE_ID, "duration": 2.5, "sample_rate": 44100,
                                    "channels": 2, "has_audio": True}),

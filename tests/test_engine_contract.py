@@ -10,14 +10,12 @@ These drive the engine through `HttpSTT`, unmodified, over a real socket: a
 client that needed a change to talk to the stand-in would mean the stand-in
 is not standing in.
 
-The media surface's expectations were read off joe's `feat/video-audio-engine`:
-`api.py`, `Modules/Media.py` and `Modules/Analysis.py` at `e98822f` for the
-upload, the analysis and the delete, and off that branch's working tree just
-after it for the transcript and the capabilities, which it had not yet
-committed. They match the statement of joe's media API (V1) that branch was
-built to: the routes under `/api/media`, the keys of each answer, 415 for a
-type it does not take, 422 for an upload with no decodable audio, and
-`{"detail": str}` for every refusal.
+The media surface's expectations were read off `api.py`, `Modules/Media.py`
+and `Modules/Analysis.py` on joe's `feat/video-audio-engine` at `4ec1424`, and
+`vox.media` was run against that engine live: the routes under `/api/media`,
+the keys of each answer, 415 for a type it does not take, 422 for an upload
+with no decodable audio, an unknown feature or a tuning out of bounds, 204
+for a delete, and `{"detail": str}` for every refusal.
 """
 
 import io
