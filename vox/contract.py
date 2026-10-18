@@ -226,6 +226,12 @@ class EngineContract:
     features_key: str = "features"
     speech_model_key: str = "speech_model"
     word_timestamps_key: str = "word_timestamps"
+    max_bytes_key: str = "max_bytes"
+    max_seconds_key: str = "max_seconds"
+    ttl_seconds_key: str = "ttl_seconds"
+    """Where the capabilities give the largest upload taken, in bytes and in
+    seconds of sound, and how long an upload is kept unused. An engine may
+    leave any of them out."""
 
     detail_key: str = "detail"
     """Where a refusal on the media surface says why."""

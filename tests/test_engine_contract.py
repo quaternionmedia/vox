@@ -10,11 +10,14 @@ These drive the engine through `HttpSTT`, unmodified, over a real socket: a
 client that needed a change to talk to the stand-in would mean the stand-in
 is not standing in.
 
-The media surface's expectations are read off the statement of joe's media
-API in the QM wave-3 lane brief (V1), which joe's `feat/video-audio-engine`
-implements: the routes under `/api/media`, the keys of each answer, 415 for
-a type it does not take, 422 for an upload with no decodable audio, and
-`{"detail": ...}` for every refusal.
+The media surface's expectations were read off joe's `feat/video-audio-engine`:
+`api.py`, `Modules/Media.py` and `Modules/Analysis.py` at `e98822f` for the
+upload, the analysis and the delete, and off that branch's working tree just
+after it for the transcript and the capabilities, which it had not yet
+committed. They match the statement of joe's media API (V1) that branch was
+built to: the routes under `/api/media`, the keys of each answer, 415 for a
+type it does not take, 422 for an upload with no decodable audio, and
+`{"detail": str}` for every refusal.
 """
 
 import io
@@ -285,7 +288,8 @@ def _wav(seconds: float, rate: int = 16000, channels: int = 1) -> bytes:
     return buffer.getvalue()
 
 
-SAID = Transcript("Hold.", "en", (Segment(0.0, 0.5, " Hold.", (Word(0.0, 0.5, " Hold.", 0.9),)),), {"model": "x"})
+SAID = Transcript("Hold.", "en", (Segment(0.0, 0.5, "Hold.", (Word(0.0, 0.5, " Hold.", 0.9),)),), {"model": "x"})
+TEMPO_TO_PEAKS = ("tempo", "beats", "onsets", "loudness", "silences", "peaks")
 MEASURED = Analysis(tempo=100.0, beats=(0.1,), onsets=(0.0,), loudness=Loudness(-20.0, -6.0, None),
                     silences=(Silence(0.5, 1.0),), peaks=Peaks(2.0, (0.5, 0.0)))
 
@@ -363,19 +367,21 @@ def test_a_media_transcript_answers_v1_s_keys(media_engine):
     assert set(body["segments"][0]["words"][0]) == {"start", "end", "word", "probability"}
 
 
-def test_a_media_transcript_without_words_answers_segments_without_them(media_engine):
+def test_a_media_transcript_without_words_answers_each_segment_s_words_empty(media_engine):
+    """joe: "`words=false` leaves every segment's `words` empty" -- the key is
+    still there; and its framework answers 422 to a flag it cannot read."""
     client, _ = media_engine
     _upload(client, _wav(1.0))
 
     body = client.post("/api/media/m1/transcribe", params={"words": "false"}).json()
     refused = client.post("/api/media/m1/transcribe", params={"words": "maybe"})
 
-    assert set(body["segments"][0]) == {"start", "end", "text"}
+    assert body["segments"][0]["words"] == []
     assert refused.status_code == 422
 
 
 def test_a_media_analysis_answers_its_duration_and_each_feature_asked_for(media_engine):
-    """`silence` asked for, `silences` answered, as V1 states it."""
+    """`silence` asked for, `silences` answered, as joe's analysis does."""
     client, _ = media_engine
     _upload(client, _wav(1.0))
 
@@ -388,26 +394,42 @@ def test_a_media_analysis_answers_its_duration_and_each_feature_asked_for(media_
     assert every["peaks"] == {"rate": 2.0, "values": [0.5, 0.0]}
 
 
-def test_a_media_analysis_refuses_a_feature_it_does_not_measure(media_engine):
+def test_a_media_analysis_reads_its_features_as_joe_does(media_engine):
+    """Named in any case, spaced or not; none named, or only commas, means
+    every one."""
+    client, _ = media_engine
+    _upload(client, _wav(1.0))
+
+    named = client.post("/api/media/m1/analyze", params={"features": " Tempo, SILENCE "}).json()
+    unnamed = [client.post("/api/media/m1/analyze", params={"features": text}).json() for text in ("", ",,")]
+
+    assert set(named) == {"duration", "tempo", "silences"}
+    assert [set(body) for body in unnamed] == [{"duration", *TEMPO_TO_PEAKS}] * 2
+
+
+def test_a_media_analysis_refuses_a_feature_it_does_not_measure_422(media_engine):
+    """joe's `_features` answers an unknown name 422, naming it."""
     client, _ = media_engine
     _upload(client, _wav(1.0))
 
     resp = client.post("/api/media/m1/analyze", params={"features": "tempo,silences"})
 
-    assert resp.status_code == 400
-    assert "silences" in resp.json()["detail"]
+    assert resp.status_code == 422
+    assert resp.json()["detail"].startswith("unknown feature 'silences'")
 
 
-def test_media_capabilities_answer_v1_s_keys(media_engine):
+def test_media_capabilities_answer_joe_s_keys(media_engine):
     client, _ = media_engine
 
     body = client.get("/api/media/capabilities").json()
 
-    assert set(body) == {"formats", "features", "speech_model", "word_timestamps"}
+    assert set(body) == {"formats", "features", "speech_model", "word_timestamps", "max_bytes",
+                         "max_seconds", "ttl_seconds"}
     assert body["features"] == ["tempo", "beats", "onsets", "loudness", "silence", "peaks"]
+    assert "audio/x-m4a" in body["formats"] and "video/matroska" in body["formats"]
 
 
-def test_a_media_delete_discards_and_an_unknown_upload_is_404_on_every_route(media_engine):
+def test_a_media_delete_answers_204_and_an_unknown_upload_is_404_on_every_route(media_engine):
     client, state = media_engine
     _upload(client, _wav(1.0))
 
@@ -418,7 +440,8 @@ def test_a_media_delete_discards_and_an_unknown_upload_is_404_on_every_route(med
         client.delete("/api/media/m1"),
     ]
 
-    assert deleted.status_code == 200 and state.uploads == {}
+    assert (deleted.status_code, deleted.content) == (204, b"")
+    assert state.uploads == {}
     assert [r.status_code for r in after] == [404, 404, 404]
     assert after[0].json() == {"detail": "No such media: m1"}
 

@@ -8,6 +8,7 @@ checked here; the platform voice, which can be heard, is checked in
 
 import inspect
 import wave
+from pathlib import Path
 
 import pytest
 
@@ -46,7 +47,7 @@ def test_it_writes_the_same_bytes_speak_does(backend, tmp_path):
     spoken = tts.speak("hold the release", out_path=str(tmp_path / "spoken.wav"))
     written = tts.to_wav("hold the release", tmp_path / "written.wav")
 
-    assert open(spoken, "rb").read() == open(written, "rb").read()
+    assert Path(spoken).read_bytes() == Path(written).read_bytes()
 
 
 def test_the_codec_s_wav_reads_back_as_its_text(tmp_path):

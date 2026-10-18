@@ -247,6 +247,16 @@ class Capabilities:
     word_timestamps: bool = False
     """Whether a transcript can time each word."""
 
+    max_bytes: int | None = None
+    """The largest upload taken, or None when the engine does not say."""
+
+    max_seconds: float | None = None
+    """The longest sound taken, or None when the engine does not say."""
+
+    ttl_seconds: float | None = None
+    """How long an upload is kept unused before the engine drops it, or None
+    when it does not say."""
+
 
 # ── Reading an answer ────────────────────────────────────────────────────────
 
@@ -442,6 +452,9 @@ def _read_capabilities(answer: Any, c: EngineContract) -> Capabilities:
         features=tuple(n for n in FEATURES if getattr(c, f"{n}_feature") in reported),
         speech_model=_maybe_text(body.get(c.speech_model_key), c.speech_model_key),
         word_timestamps=bool(_maybe_flag(body.get(c.word_timestamps_key), c.word_timestamps_key)),
+        max_bytes=_maybe_whole(body.get(c.max_bytes_key), c.max_bytes_key),
+        max_seconds=_maybe_number(body.get(c.max_seconds_key), c.max_seconds_key),
+        ttl_seconds=_maybe_number(body.get(c.ttl_seconds_key), c.ttl_seconds_key),
     )
 
 

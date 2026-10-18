@@ -94,6 +94,9 @@ ALIEN = EngineContract(
     features_key="measures",
     speech_model_key="model_name",
     word_timestamps_key="times_words",
+    max_bytes_key="most_bytes",
+    max_seconds_key="most_secs",
+    ttl_seconds_key="kept_for",
     detail_key="why",
 )
 
@@ -311,7 +314,7 @@ SAID = Transcript(
     text="Approve the deploy.",
     language="en",
     segments=(
-        Segment(0.0, 1.2, " Approve the deploy.", (
+        Segment(0.0, 1.2, "Approve the deploy.", (
             Word(0.0, 0.5, " Approve", 0.98), Word(0.5, 0.7, " the", 0.99), Word(0.7, 1.2, " deploy.", 0.95),
         )),
     ),
@@ -361,7 +364,8 @@ def test_the_media_surface_answers_on_either_contract(media):
     assert upload == MediaHandle("m1", 1.5, 16000, 1, True)
     assert engine.transcribe(upload) == SAID
     assert engine.analyze(upload) == replace(MEASURED, duration=1.5)
-    assert engine.capabilities().features == FEATURES
+    capabilities = engine.capabilities()
+    assert (capabilities.features, capabilities.max_bytes) == (FEATURES, state.media_limit)
     assert engine.close(upload) is True
     assert state.uploads == {}
 

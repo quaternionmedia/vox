@@ -46,10 +46,10 @@ SAID = Transcript(
     text="Approve the deploy. Hold the release.",
     language="en",
     segments=(
-        Segment(0.0, 1.2, " Approve the deploy.", (
+        Segment(0.0, 1.2, "Approve the deploy.", (
             Word(0.0, 0.5, " Approve", 0.98), Word(0.5, 0.7, " the", 0.99), Word(0.7, 1.2, " deploy.", 0.95),
         )),
-        Segment(1.4, 2.0, " Hold the release.", (
+        Segment(1.4, 2.0, "Hold the release.", (
             Word(1.4, 1.6, " Hold", 0.9), Word(1.6, 1.7, " the", 0.97), Word(1.7, 2.0, " release.", 0.93),
         )),
     ),
@@ -177,7 +177,7 @@ def test_words_false_asks_for_segments_alone(engine):
     transcript = media.transcribe(upload, words=False)
 
     assert state.requests[-1] == "/api/media/m1/transcribe?words=false"
-    assert [s.text for s in transcript.segments] == [" Approve the deploy.", " Hold the release."]
+    assert [s.text for s in transcript.segments] == ["Approve the deploy.", "Hold the release."]
     assert transcript.words == ()
 
 
@@ -220,7 +220,7 @@ def test_an_analysis_asks_for_every_feature_the_contract_names(engine):
 def test_a_feature_is_asked_for_by_the_engine_s_name_and_read_back_by_vox_s(engine):
     """vox says `silences`; the engine is asked for `silence`.
 
-    Seen to fail by sending vox's own name: the engine refused it, 400,
+    Seen to fail by sending vox's own name: the engine refused it, 422,
     naming `silences` as a feature it does not measure."""
     media, state = engine
     upload = media.upload(_wav(2.0), "audio/wav")
@@ -334,64 +334,93 @@ def test_close_sends_nothing_on_a_contract_whose_uploads_only_expire():
 # ─── an engine's own answers ──────────────────────────────────────────────────
 
 
-def test_the_default_contract_reads_the_engine_s_own_answers():
-    """Literal answers in the default spelling, with the extra keys a
-    whisper-backed engine leaves in its segments, read without the stand-in:
-    the stand-in writes under the same contract the client reads with, and a
-    key both spell wrong would pass between them."""
-    answers = {
-        ("POST", "/api/media"): (201, {"media_id": "3f2a", "duration": 2.5, "sample_rate": 44100,
-                                       "channels": 2, "has_audio": True}),
-        ("POST", "/api/media/3f2a/transcribe"): (200, {
-            "text": "Approve the deploy.",
-            "language": "en",
-            "segments": [{
-                "id": 0, "seek": 0, "start": 0.0, "end": 1.2, "text": " Approve the deploy.",
-                "tokens": [50364, 32923], "temperature": 0.0, "avg_logprob": -0.21,
-                "compression_ratio": 0.8, "no_speech_prob": 0.01,
-                "words": [{"word": " Approve", "start": 0.0, "end": 0.5, "probability": 0.98},
-                          {"word": " the", "start": 0.5, "end": 0.7, "probability": 0.99},
-                          {"word": " deploy.", "start": 0.7, "end": 1.2, "probability": 0.95}],
-            }],
-            "info": {"model": "base", "beam_size": 5},
-        }),
-        ("POST", "/api/media/3f2a/analyze"): (200, {
-            "duration": 2.5, "tempo": 120.0, "beats": [0.5, 1.0], "onsets": [0.02],
-            "loudness": {"rms_db": -20.1, "peak_db": -1.5, "lufs": None},
-            "silences": [{"start": 1.2, "end": 2.5}],
-            "peaks": {"rate": 2, "values": [0.2, 0.9, 0.1, 0.0, 0.0]},
-        }),
-        ("GET", "/api/media/capabilities"): (200, {
-            "formats": ["wav", "mp3", "mp4"], "features": ["tempo", "beats", "onsets", "loudness", "silence", "peaks"],
-            "speech_model": "base", "word_timestamps": True,
-        }),
-    }
+JOE_ID = "0f3c2a9be1d84c6f9a7e5b4d3c2b1a09"
 
-    def answer(request: httpx.Request) -> httpx.Response:
-        status, body = answers[(request.method, request.url.path)]
-        return httpx.Response(status, json=body)
+# The answers joe's media routes give, in the shapes its `api.py` and
+# `Modules/Media.py` write them (`feat/video-audio-engine`): a 201 for an
+# upload, a 204 with no body for a delete, a segment's text trimmed and each
+# word's leading space kept, and capabilities that also state its limits.
+JOE_ANSWERS = {
+    ("POST", "/api/media"): (201, {"media_id": JOE_ID, "duration": 2.5, "sample_rate": 44100,
+                                   "channels": 2, "has_audio": True}),
+    ("POST", f"/api/media/{JOE_ID}/transcribe"): (200, {
+        "text": "Approve the deploy.",
+        "language": "en",
+        "segments": [{
+            "start": 0.0, "end": 1.2, "text": "Approve the deploy.",
+            "words": [{"start": 0.0, "end": 0.5, "word": " Approve", "probability": 0.98},
+                      {"start": 0.5, "end": 0.7, "word": " the", "probability": 0.99},
+                      {"start": 0.7, "end": 1.2, "word": " deploy.", "probability": 0.95}],
+        }],
+        "info": {"model": "whisper-base", "language": None, "words": True, "duration": 2.5,
+                 "avg_logprob": -0.21, "no_speech_prob": 0.01, "compression_ratio": 0.8},
+    }),
+    ("POST", f"/api/media/{JOE_ID}/analyze"): (200, {
+        "duration": 2.5, "tempo": 120.0, "beats": [0.5, 1.0], "onsets": [0.02],
+        "loudness": {"rms_db": -20.1, "peak_db": -1.5, "lufs": None},
+        "silences": [{"start": 1.2, "end": 2.5}],
+        "peaks": {"rate": 50, "values": [0.2, 0.9, 0.1, 0.0, 0.0]},
+    }),
+    ("GET", "/api/media/capabilities"): (200, {
+        "formats": ["audio/mpeg", "audio/wav", "video/mp4"],
+        "features": ["tempo", "beats", "onsets", "loudness", "silence", "peaks"],
+        "speech_model": "whisper-base", "word_timestamps": True,
+        "max_bytes": 1073741824, "max_seconds": 7200.0, "ttl_seconds": 3600.0,
+    }),
+    ("DELETE", f"/api/media/{JOE_ID}"): (204, None),
+}
 
-    with httpx.Client(transport=httpx.MockTransport(answer)) as client:
+
+def _joe(request: httpx.Request) -> httpx.Response:
+    status, body = JOE_ANSWERS[(request.method, request.url.path)]
+    return httpx.Response(status) if body is None else httpx.Response(status, json=body)
+
+
+def test_the_default_contract_reads_joe_s_own_answers():
+    """Read without the stand-in: the stand-in writes under the same contract
+    the client reads with, and a key both spelled wrong would pass between
+    them. These are joe's literal answers."""
+    with httpx.Client(transport=httpx.MockTransport(_joe)) as client:
         media = MediaEngine(EngineContract(), BASE, client=client)
         upload = media.upload(b"RIFF", "video/mp4")
         transcript = media.transcribe(upload)
         analysis = media.analyze(upload)
         capabilities = media.capabilities()
+        discarded = media.close(upload)
 
-    assert upload == MediaHandle("3f2a", 2.5, 44100, 2, True)
+    assert upload == MediaHandle(JOE_ID, 2.5, 44100, 2, True)
     assert transcript == Transcript(
         text="Approve the deploy.", language="en",
-        segments=(Segment(0.0, 1.2, " Approve the deploy.", (
+        segments=(Segment(0.0, 1.2, "Approve the deploy.", (
             Word(0.0, 0.5, " Approve", 0.98), Word(0.5, 0.7, " the", 0.99), Word(0.7, 1.2, " deploy.", 0.95),
         )),),
-        info={"model": "base", "beam_size": 5},
+        info={"model": "whisper-base", "language": None, "words": True, "duration": 2.5,
+              "avg_logprob": -0.21, "no_speech_prob": 0.01, "compression_ratio": 0.8},
     )
     assert analysis == Analysis(
         duration=2.5, tempo=120.0, beats=(0.5, 1.0), onsets=(0.02,),
         loudness=Loudness(-20.1, -1.5, None), silences=(Silence(1.2, 2.5),),
-        peaks=Peaks(2.0, (0.2, 0.9, 0.1, 0.0, 0.0)),
+        peaks=Peaks(50.0, (0.2, 0.9, 0.1, 0.0, 0.0)),
     )
-    assert capabilities == Capabilities(("wav", "mp3", "mp4"), FEATURES, "base", True)
+    assert capabilities == Capabilities(
+        formats=("audio/mpeg", "audio/wav", "video/mp4"), features=FEATURES, speech_model="whisper-base",
+        word_timestamps=True, max_bytes=1073741824, max_seconds=7200.0, ttl_seconds=3600.0,
+    )
+    assert discarded is True
+
+
+def test_keys_an_answer_carries_beyond_its_contract_are_passed_over():
+    """An engine may say more than its contract names -- a whisper segment's
+    own `id`, `seek` and `tokens` -- and what the contract names is read alone."""
+    answer = {"text": "hi", "language": "en", "model_seconds": 0.4, "segments": [{
+        "id": 0, "seek": 0, "start": 0.0, "end": 1.0, "text": "hi", "tokens": [50364, 2421],
+        "temperature": 0.0, "avg_logprob": -0.2, "words": [{"start": 0.0, "end": 1.0, "word": " hi",
+                                                            "probability": 0.9, "tokens": [2421]}],
+    }]}
+    with _answering(200, answer) as client:
+        transcript = MediaEngine(EngineContract(), BASE, client=client).transcribe("m1")
+
+    assert transcript == Transcript("hi", "en", (Segment(0.0, 1.0, "hi", (Word(0.0, 1.0, " hi", 0.9),)),))
 
 
 # ─── what goes wrong, and how it is said ──────────────────────────────────────

@@ -182,7 +182,9 @@ with MediaEngine(EngineContract(), "http://127.0.0.1:8010") as engine:
   (`start`, `end`, `text`, `words`), each word a `Word` (`start`, `end`,
   `word`, `probability`), timed in seconds of the upload; an `Analysis`
   (`duration`, `tempo`, `beats`, `onsets`, `loudness`, `silences`, `peaks`);
-  and from `capabilities()`, what the engine takes and offers.
+  and from `capabilities()`, what the engine takes and offers, and the
+  limits it states: the largest upload, the longest sound, and how long an
+  upload is kept.
 - **A feature is asked for by vox's name**, the `Analysis` field, and the
   contract names the engine's: `vox.adapters.joe` asks for `silence` and
   reads the answer under `silences`.
@@ -236,9 +238,10 @@ fails the offline suite rather than a live run:
   a body it cannot decode, which is anything but a WAV. A transcribe answers
   `EngineState.transcript` and an analyze `EngineState.analysis`, so nothing
   about what an upload says is measured. An unknown upload is 404 on every
-  route, and no id is handed out twice. `media_transport(state)` answers the
-  same surface in-process, as an `httpx.MockTransport`, for a client built
-  around it.
+  route and an unknown feature 422, a delete is 204 with no body, and no id
+  is handed out twice. `media_transport(state)` answers the same surface
+  in-process, as an `httpx.MockTransport`, for a client built around it.
+  `tests/test_engine_contract.py` names the joe commit each answer was read at.
 
 ## What runs, and what it records
 

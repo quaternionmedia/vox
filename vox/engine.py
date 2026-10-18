@@ -49,17 +49,19 @@ SAMPLE_RATE = 16000
 """16 kHz, which is what speech models resample to anyway."""
 
 MEDIA_FORMATS = (
-    "audio/wav", "audio/wave", "audio/x-wav", "audio/mpeg", "audio/ogg", "audio/flac",
-    "audio/mp4", "audio/aac", "audio/webm",
-    "video/mp4", "video/quicktime", "video/webm", "video/x-matroska",
+    "audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave",
+    "audio/mpeg", "audio/mp3", "audio/ogg", "audio/flac", "audio/x-flac",
+    "audio/mp4", "audio/m4a", "audio/x-m4a", "audio/aac", "audio/x-aac", "audio/webm",
+    "video/mp4", "video/quicktime", "video/webm", "video/x-matroska", "video/matroska",
 )
-"""The content types the media upload takes: the audio and video formats of
-the engine it stands in for. Whatever the declared type, only a WAV body is
-decoded, as an engine decodes by content; anything else is answered 422."""
+"""The content types the media upload takes: those the engine it stands in
+for takes, each format under the names browsers and platforms give it.
+Whatever the declared type, only a WAV body is decoded, as an engine decodes
+by content; anything else is answered 422."""
 
-MEDIA_LIMIT = 100 * 1024 * 1024
-"""The most bytes the media upload takes, the cap of the engine it stands in
-for on its audio uploads. A larger upload is answered 413."""
+MEDIA_LIMIT = 1024**3
+"""The most bytes the media upload takes, the default cap of the engine it
+stands in for. A larger upload is answered 413."""
 
 MAGIC = b"VOX1"
 """Marks a WAV as written by `encode_wav`.
@@ -227,7 +229,12 @@ class _Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         status, body = _answer_media(self.state, found, parse_qs(route.query),
                                      self.headers.get("Content-Type") or "", self.rfile.read(length))
-        self._send(status, body)
+        if body is None:
+            # An answer with nothing to say, as a delete's 204 is: no body at all.
+            self.send_response(status)
+            self.end_headers()
+        else:
+            self._send(status, body)
         return True
 
     def do_GET(self):  # noqa: N802 — BaseHTTPRequestHandler's spelling
@@ -392,8 +399,9 @@ def _probe_wav(body: bytes) -> tuple[int, int, int] | None:
 
 
 def _answer_media(state: EngineState, route: tuple[str, str | None], query: dict[str, list[str]],
-                  content_type: str, body: bytes) -> tuple[int, dict]:
-    """Answer one request on the media surface, under the contract's keys."""
+                  content_type: str, body: bytes) -> tuple[int, dict | None]:
+    """Answer one request on the media surface, under the contract's keys. A
+    body of None is an answer with none, as a delete's is."""
     name, media_id = route
     contract = state.contract
     if name == "upload":
@@ -407,6 +415,10 @@ def _answer_media(state: EngineState, route: tuple[str, str | None], query: dict
             # It has no speech model; the transcript it answers is the script.
             contract.speech_model_key: None,
             contract.word_timestamps_key: True,
+            contract.max_bytes_key: state.media_limit,
+            # It takes a sound of any length, and keeps an upload until it is deleted.
+            contract.max_seconds_key: None,
+            contract.ttl_seconds_key: None,
         }
     upload = state.uploads.get(media_id)
     if upload is None:
@@ -417,7 +429,7 @@ def _answer_media(state: EngineState, route: tuple[str, str | None], query: dict
     if name == "analyze":
         return _media_analyze(state, upload, query)
     del state.uploads[media_id]
-    return 200, {contract.media_id_key: media_id}
+    return 204, None
 
 
 def _media_upload(state: EngineState, content_type: str, body: bytes) -> tuple[int, dict]:
@@ -456,15 +468,18 @@ def _media_transcribe(state: EngineState, query: dict[str, list[str]]) -> tuple[
     script = state.transcript or Transcript(text="", language=None, segments=())
     segments = []
     for segment in script.segments:
-        shown = {contract.start_key: segment.start, contract.end_key: segment.end,
-                 contract.text_key: segment.text}
-        if words:
-            shown[contract.words_key] = [
+        segments.append({
+            contract.start_key: segment.start,
+            contract.end_key: segment.end,
+            contract.text_key: segment.text,
+            # Asked for no words, a segment still says where its words are:
+            # an empty list.
+            contract.words_key: [
                 {contract.start_key: w.start, contract.end_key: w.end,
                  contract.word_key: w.word, contract.probability_key: w.probability}
                 for w in segment.words
-            ]
-        segments.append(shown)
+            ] if words else [],
+        })
     return 200, {
         contract.text_key: script.text,
         contract.language_key: language or script.language,
@@ -476,15 +491,13 @@ def _media_transcribe(state: EngineState, query: dict[str, list[str]]) -> tuple[
 def _media_analyze(state: EngineState, upload: MediaHandle, query: dict[str, list[str]]) -> tuple[int, dict]:
     contract = state.contract
     offered = {getattr(contract, f"{n}_feature"): n for n in FEATURES if getattr(contract, f"{n}_feature")}
-    if contract.features_param and contract.features_param in query:
-        names = [n.strip() for n in query[contract.features_param][0].split(",") if n.strip()]
-        unknown = [n for n in names if n not in offered]
-        if unknown or not names:
-            return 400, {contract.detail_key: f"Unknown feature(s): {', '.join(unknown) or 'none named'}. "
-                                              f"Offered: {', '.join(offered)}"}
-        asked = [offered[n] for n in names]
-    else:
-        asked = list(offered.values())
+    named = query.get(contract.features_param, [""])[0] if contract.features_param else ""
+    names = [n.strip().lower() for n in named.split(",") if n.strip()]
+    unknown = [n for n in names if n not in offered]
+    if unknown:
+        return 422, {contract.detail_key: f"unknown feature '{unknown[0]}'; it measures {', '.join(offered)}"}
+    # None named measures every one, as the stood-in engine does.
+    asked = [offered[n] for n in names] if names else list(offered.values())
     script = state.analysis or Analysis()
     body: dict = {contract.duration_key: upload.duration}
     for name in asked:
@@ -529,7 +542,7 @@ def media_transport(state: EngineState) -> httpx.MockTransport:
             return httpx.Response(404, json={"detail": "Not Found"})
         status, body = _answer_media(state, found, parse_qs(route.query),
                                      request.headers.get("Content-Type", ""), request.content)
-        return httpx.Response(status, json=body)
+        return httpx.Response(status) if body is None else httpx.Response(status, json=body)
 
     return httpx.MockTransport(answer)
 

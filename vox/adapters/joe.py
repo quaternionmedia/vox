@@ -83,6 +83,9 @@ JOE = EngineContract(
     features_key="features",
     speech_model_key="speech_model",
     word_timestamps_key="word_timestamps",
+    max_bytes_key="max_bytes",
+    max_seconds_key="max_seconds",
+    ttl_seconds_key="ttl_seconds",
     detail_key="detail",
 )
 """joe's surface. Its files resolve under that engine's `Data/Audio` and
