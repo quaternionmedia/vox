@@ -2,10 +2,11 @@
 
 Most of these run the real client -- building each request in the contract's
 spelling, reading each answer into dataclasses -- against the stand-in's
-media surface in-process (`vox.engine.media_transport`), which holds a caller
-to what the engine it stands in for refuses. Where a test needs an answer the
-stand-in never gives -- an engine's literal JSON, a malformed one, a timeout
--- it hands the client an `httpx.MockTransport` that answers just that.
+media surface in-process (`vox.engine.media_transport`), which refuses as
+joe does where README's *Against joe's media API* says it does, and not
+elsewhere. Where a test needs an answer the stand-in never gives -- an
+engine's literal JSON, a malformed one, a timeout -- it hands the client an
+`httpx.MockTransport` that answers just that.
 
 `tests/test_contract.py` runs the same client against a contract sharing no
 spelling with the default one these use.

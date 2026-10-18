@@ -107,8 +107,11 @@ def test_transcribe_404s_on_a_missing_file(engine):
 def test_transcribe_refuses_to_leave_its_directory(engine, escape):
     """joe's `_resolve_audio_path` containment check, held to here too.
 
-    The stand-in has to refuse what joe refuses, or a path-traversal defect
+    The stand-in refuses the escapes joe refuses, or a path-traversal defect
     in a caller passes the offline suite and fails against the real engine.
+    It does not refuse every name joe does: since `d1dc980` joe answers 404
+    to any name that is not bare, and the stand-in answers one with a
+    separator in it that stays inside its directory.
     """
     base_url, _, audio_dir = engine
     encode_wav("secret", audio_dir.parent / "outside.wav")

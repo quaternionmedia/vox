@@ -221,9 +221,13 @@ the engine answers; from an event loop, run them in a worker thread.
 
 ## The offline engine
 
-`vox.engine` answers whichever `EngineContract` it is given, and holds a
-caller to what the engine it stands in for refuses, so a defect in a caller
-fails the offline suite rather than a live run:
+`vox.engine` answers whichever `EngineContract` it is given. It refuses what
+the list below says it refuses, much of it read off joe, so a caller's defect
+of those kinds fails the offline suite rather than a live run. It is not joe:
+joe refuses requests the stand-in answers, and the stand-in refuses some joe
+takes, every upload that is not a WAV among them, so a caller the offline
+suite passes can still be refused live. *Against joe's media API*, below,
+sets the two side by side for the media surface.
 
 - **It binds a port the OS picks** and reports it; a fixed port can be
   another program's server.
@@ -231,7 +235,8 @@ fails the offline suite rather than a live run:
   beside `status`, so a caller can tell it from a real engine left running.
 - **It refuses a name that leaves its directories.** A `transcribe` filename
   resolving outside every audio directory is answered 404, as for a missing
-  file.
+  file. joe answers 404 to any name that is not bare; the stand-in answers a
+  name with a separator in it that stays inside its directory.
 - **It refuses audio it did not write.** `decode_wav` reads only WAVs
   `encode_wav` wrote, marked with `VOX1`, and raises
   `NotVoxAudioError` for anything else.
@@ -239,8 +244,10 @@ fails the offline suite rather than a live run:
   outside `0 < duration <= 60` is answered 400; when the contract names a
   pause parameter, a pause outside `100..5000` milliseconds is answered 400
   under that contract's spelling. A duration or pause that does not parse is
-  answered 422, and a `listen` with no microphone 503. `tests/test_engine_contract.py` names the joe
-  commit each bound was read at.
+  answered 422, and a `listen` with no microphone 503. joe also refuses a
+  hint over 500 characters, and holds a watch to the same bounds as a
+  `listen`; the stand-in does neither. `tests/test_engine_contract.py` names
+  the joe commit each bound was read at.
 - **It records what arrived.** `EngineState` keeps every request served, and
   the pauses, hints, announcements and watches each one carried, for a test
   to assert on; the engine itself has no speaker to wait for and no
@@ -256,6 +263,34 @@ fails the offline suite rather than a live run:
   handed out twice. `media_transport(state)` answers the same surface
   in-process, as an `httpx.MockTransport`, for a client built around it.
   `tests/test_engine_contract.py` names the joe commit each answer was read at.
+
+### Against joe's media API
+
+What joe's media API refuses, read off `api.py` and `Modules/Media.py` on
+joe's `feat/video-audio-engine` at `4ec1424` and checked against it, beside
+what `vox.engine` does with the same request:
+
+| The request | joe | `vox.engine` |
+|---|---|---|
+| An upload with no `Content-Type`, or one joe does not take | 415, judged first | 415 for the same twenty types, judged after the size |
+| An upload over the size cap: joe's `JOE_MEDIA_MAX_BYTES`, the stand-in's `EngineState.media_limit`, 1 GiB each by default | 413, judged on `Content-Length` before the body is read, or as it arrives | 413, judged on the whole body once read |
+| An upload with no audio ffmpeg can decode, a video with no sound track, or a sound with no samples | 422 | 422 for any body but a WAV with frames, so also for every MP3, OGG, FLAC, M4A, AAC, WebM, MP4, MOV and MKV joe takes |
+| An upload whose sound is longer than `JOE_MEDIA_MAX_SECONDS`, two hours by default | 413 | taken |
+| An upload while joe has no ffmpeg, or one that cannot run | 503 | taken: it runs no ffmpeg |
+| An upload ffmpeg is still decoding after 600 s | 422 | taken |
+| A transcript asked with a `words` that is not a boolean | 422, before the id is looked up; `t`, `f`, `y` and `n` are booleans | 422 once the id is found, and for `t`, `f`, `y` and `n` too |
+| A transcript asked in a language whisper does not know | 422 | answered, with that language as the transcript's |
+| An analysis asked for an unknown feature, or tuned out of bounds or with a value that is not a number | 422, before the id is looked up; `peaks_rate=5.0` is read as 5 | 422 once the id is found, and for `peaks_rate=5.0` too |
+| A route with an id in it, for one never handed out, or deleted | 404 | 404 |
+| A route with an id in it, for one unused for `JOE_MEDIA_TTL`, an hour by default | 404 | answered: nothing expires |
+| Any route, on a failure of joe's own | 500 | -- |
+
+Where both refuse, the status matches and the body is `{"detail": str}`
+under the contract's `detail_key`; only the sentence differs. Each judges in
+its own order: an oversized upload of a type joe does not take is joe's 415
+and the stand-in's 413, and an unknown id asked with a bad `words`, feature
+or tuning is joe's 422 and the stand-in's 404. `tests/test_engine_contract.py`
+holds the stand-in to each refusal the two share.
 
 ## What runs, and what it records
 
