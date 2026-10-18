@@ -376,6 +376,22 @@ MUTATIONS = [
         catches="tests/test_engine_contract.py::test_a_media_id_is_never_reused",
         why="A caller holding a discarded upload's id would reach somebody else's upload with it.",
     ),
+    Mutation(
+        name="narration written by the platform voice is also played",
+        path="vox/adapters/pyttsx3.py",
+        find="            _sapi_speak(text, out_path, False, None)",
+        replace="            _sapi_speak(text, out_path, True, None)",
+        catches="tests/test_adapters.py::test_on_sapi_to_wav_writes_the_file_and_plays_nothing_whatever_playback_says",
+        why="Making narration for a video would read every line aloud through the speakers of whoever made it.",
+    ),
+    Mutation(
+        name="narration is written to the synthesizer's own directory",
+        path="vox/synth.py",
+        find="        return write_wav(synthesize(text, self.rate), path, self.rate)",
+        replace='        return write_wav(synthesize(text, self.rate), os.path.join(self.out_dir, "narration.wav"), self.rate)',
+        catches="tests/test_tts.py::test_it_writes_the_wav_where_it_is_told_and_says_where",
+        why="A timeline would lay a path under its video that holds nothing, while the narration sat elsewhere under one fixed name.",
+    ),
 ]
 
 

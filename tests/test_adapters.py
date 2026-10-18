@@ -175,6 +175,35 @@ def test_on_sapi_the_outputs_are_listed_by_name(monkeypatch):
     assert pyttsx3_adapter.outputs() == list(_FakeSapi.OUTPUTS)
 
 
+def test_on_sapi_to_wav_writes_the_file_and_plays_nothing_whatever_playback_says(monkeypatch, tmp_path):
+    """Mutation: write it with playback on -- red, a player voice reads the
+    file aloud."""
+    fake = _sapi_installed(monkeypatch)
+    path = tmp_path / "narration" / "line.wav"
+
+    written = Pyttsx3TTS(out_dir=str(tmp_path / "out"), playback=True).to_wav("Approved.", path)
+
+    assert written == str(path) and path.parent.is_dir()
+    (writer,) = fake.voices
+    writer.Speak.assert_called_once_with("Approved.", 0)
+    fake.streams[0].Open.assert_called_once_with(str(path), pyttsx3_adapter.SSFM_CREATE_FOR_WRITE)
+    assert len(fake.streams) == 1
+
+
+def test_to_wav_through_pyttsx3_saves_the_file_and_says_nothing(tmp_path):
+    fake_pyttsx3 = MagicMock()
+    fake_engine = MagicMock()
+    fake_pyttsx3.init.return_value = fake_engine
+    path = tmp_path / "line.wav"
+
+    with patch.dict(sys.modules, {"pyttsx3": fake_pyttsx3}):
+        written = Pyttsx3TTS(out_dir=str(tmp_path / "out"), playback=True).to_wav("Approved.", path)
+
+    assert written == str(path)
+    assert [c[0] for c in fake_engine.mock_calls] == ["save_to_file", "runAndWait"]
+    fake_engine.save_to_file.assert_called_once_with("Approved.", str(path))
+
+
 # ─── the line between the seam and the adapters ───────────────────────────────
 
 def test_importing_vox_pulls_in_no_adapter():

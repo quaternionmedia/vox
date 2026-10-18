@@ -149,3 +149,18 @@ class Pyttsx3TTS:
             engine.say(text)
             engine.runAndWait()
         return out_path
+
+    def to_wav(self, text: str, path: str | os.PathLike[str]) -> str:
+        """`text` in the platform voice, written to a WAV at `path` and played
+        nowhere, whatever `playback` says: narration to be used, not heard."""
+        out_path = str(path)
+        os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+        if _sapi():
+            _sapi_speak(text, out_path, False, None)
+            return out_path
+        import pyttsx3
+
+        engine = pyttsx3.init()
+        engine.save_to_file(text, out_path)
+        engine.runAndWait()
+        return out_path

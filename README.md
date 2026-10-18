@@ -105,6 +105,10 @@ stt = HttpSTT("http://localhost:9000", contract=MINE)
 
 A synthesizer adapter is any object with `speak(text, out_path=None) -> str`;
 one that can be cut short also takes `until=`, a callable that says when to stop.
+Its `to_wav(text, path) -> str` writes the WAV and plays nothing, for audio
+made to be used rather than heard: narration laid under a video, or a clip
+uploaded to an engine. `FormantTTS().to_wav` makes audible narration that is
+the same bytes on any machine.
 
 An engine that shows the exchange to a person can name a `conversation`
 route. `HttpSTT.announce(state, text, reason=None)` then posts a dialog's own

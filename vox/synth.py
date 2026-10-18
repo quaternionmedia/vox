@@ -250,3 +250,8 @@ class FormantTTS:
             digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
             out_path = os.path.join(self.out_dir, f"say_{digest}.wav")
         return write_wav(synthesize(text, self.rate), out_path, self.rate)
+
+    def to_wav(self, text: str, path: str | os.PathLike[str]) -> str:
+        """`text`, synthesized to a WAV at `path`: audible narration, the same
+        bytes for the same text on any machine."""
+        return write_wav(synthesize(text, self.rate), path, self.rate)
