@@ -247,7 +247,7 @@ fails the offline suite rather than a live run:
 
 | Command | What it is |
 |---|---|
-| `uv run pytest` | the suite and the worked example in `walkthrough/`, which rewrites `walkthrough/closed-loop.md` with what actually happened |
+| `uv run pytest` | the suite and the worked examples in `walkthrough/`, which rewrite `walkthrough/closed-loop.md` and `walkthrough/media-engine.md` with what actually happened |
 | `uv run python walkthrough/mutate.py` | breaks each guard on purpose and requires it to go red; records `walkthrough/mutations.md` |
 | `uv run python walkthrough/check_wheel.py` | reads the built wheel's manifest, because an editable install hides a package the build never declared |
 

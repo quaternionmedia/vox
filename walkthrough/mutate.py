@@ -377,6 +377,14 @@ MUTATIONS = [
         why="A caller holding a discarded upload's id would reach somebody else's upload with it.",
     ),
     Mutation(
+        name="the stand-in reports a length it did not read from the upload",
+        path="vox/engine.py",
+        find='    handle = MediaHandle(f"m{next(state._ids)}", frames / rate, rate, channels, True)',
+        replace='    handle = MediaHandle(f"m{next(state._ids)}", 1.0, rate, channels, True)',
+        catches="walkthrough/test_media_engine.py::test_the_narration_goes_up_with_its_real_length",
+        why="Captions clamped to an upload's length would be clamped to a number the stand-in made up, and pass.",
+    ),
+    Mutation(
         name="narration written by the platform voice is also played",
         path="vox/adapters/pyttsx3.py",
         find="            _sapi_speak(text, out_path, False, None)",
