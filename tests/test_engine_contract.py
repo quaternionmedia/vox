@@ -2,9 +2,10 @@
 
 A stand-in that drifts from the engine it stands in for keeps the suite
 green while the seam stops working against the real one. Every expectation
-here was read off joe's `api.py` and `Modules/Voice.py` at `c2d9a01`, except
-where a test's docstring names a later commit, at which that one was read;
-the commit is named so a reader can diff rather than re-derive.
+here can be read off joe's `api.py` and `Modules/Voice.py` at `ed81c4f`, on
+joe's `main`, except where a test's docstring names a later commit, at which
+that one was read; the commit is named so a reader can diff rather than
+re-derive.
 
 These drive the engine through `HttpSTT`, unmodified, over a real socket: a
 client that needed a change to talk to the stand-in would mean the stand-in
