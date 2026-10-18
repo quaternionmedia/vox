@@ -4,11 +4,15 @@ Where vox sits between the speech engine it drives and the repositories that
 vendor it, for someone picking it up cold. `README.md` is the surface; this
 is the part that is not visible from inside this clone.
 
-**Stamped 2026-10-18**, at `vox` `feat/media-engine` `dc7da78` (from `main`
-`1721e6f`), `joe` `feat/video-audio-engine` `4ec1424` (from `main`
-`d72b65b`), `qmcp` `main` `df42315`, and `alfred` `integrate/wave-2`
-`66fa618` with its `feat/captions` at `6376ed6`. Every figure was true at
-those commits and nowhere else; the workstation's audio inputs were counted
+**Stamped 2026-10-18**, at `vox` `docs/handoff-current`, from
+`feat/media-engine` `aa17dbd` (from `main` `1721e6f`); `joe`
+`feat/video-audio-engine` `4ec1424` (from `main` `d72b65b`); `qmcp`
+`feat/alfred-captions` `691a367` (from `main` `df42315`); `alfred`
+`integrate/wave-3` `2e4024c`; and `qm` `main` `b97b14c`. Every figure was
+true at those commits and nowhere else, with two exceptions. The live media
+figures -- the first transcript, the analysis, the oversized upload -- were
+measured against joe at `4ec1424` while vox was at `dc7da78`, and nothing
+under `vox/` has changed since. The workstation's audio inputs were counted
 at the 2026-10-12 stamp and not again.
 
 ## The shape
@@ -31,22 +35,35 @@ audio or video --> the same engine's media surface --> a transcript, timed,
   and records from its own machine's microphone. On joe's
   `feat/video-audio-engine` it also takes uploads at `/api/media` -- audio,
   or a video whose sound it extracts with ffmpeg -- and answers a transcript
-  with word times and what the sound measures, with librosa.
-- **qmcp** is a consumer. It vendors vox as a submodule at `vendor/vox` and
-  uses it to answer its human-in-the-loop queue by speaking, as
-  `qmcp human voice`. The submodule is not at qmcp's root: an editable
-  install puts that root on `sys.path`, and a directory there named `vox`
-  with no `__init__.py` resolves `import vox` to an empty namespace package
-  in place of this one.
+  with word times and what the sound measures, with librosa. joe's `main`
+  has no media surface; until that branch lands, a media check runs against
+  the branch.
+- **qmcp** is a consumer of the voice surface. It vendors vox as a submodule
+  at `vendor/vox` and uses it to answer its human-in-the-loop queue by
+  speaking, as `qmcp human voice`. Its `main` and its `feat/alfred-captions`
+  both pin vox at `c0b9b18`, from before `vox.media`, and neither uses the
+  media surface: the alfred tools `feat/alfred-captions` adds drive alfred's
+  own HTTP API. The submodule is not at qmcp's root: an editable install
+  puts that root on `sys.path`, and a directory there named `vox` with no
+  `__init__.py` resolves `import vox` to an empty namespace package in place
+  of this one.
 - **alfred**, the browser video editor, is the media surface's consumer.
-  Its `feat/captions` vendors vox as a submodule at `alfred/vox`, beside its
-  render engine at `alfred/otto`: cooperating engines under alfred's
-  control plane, otto the picture and vox the sound. Its captions
-  transcribe a timeline's mix through `vox.media`, and its library measures
-  a file's sound through it, all from one module,
-  `alfred/core/utils/audio_engine.py`. At this stamp the submodule is
-  pinned at vox `main` `1721e6f`, which has no `vox.media`; the pin moves
-  to this work when alfred's wave is integrated.
+  Its `integrate/wave-3`, where its captions work is merged, vendors vox as
+  a submodule at `alfred/vox`, beside its render engine at `alfred/otto`:
+  cooperating engines under alfred's control plane, otto the picture and
+  vox the sound. One module imports vox, `alfred/core/utils/audio_engine.py`:
+  alfred's captions transcribe a timeline's mix through `vox.media`, and
+  its library measures a file's sound through it. That module builds the
+  contract from vox's defaults, with `ALFRED_AUDIO_ENGINE_CONTRACT_<FIELD>`
+  in place of each field named, reaches the engine at
+  `ALFRED_AUDIO_ENGINE_URL`, and gives an answer
+  `ALFRED_AUDIO_ENGINE_TIMEOUT`, 1800 seconds unless set. alfred installs
+  vox editable with `--no-deps` -- in its image, its nox sessions and its
+  CI -- so everything `import vox` loads has to need nothing beyond httpx,
+  which alfred locks itself. At this stamp the submodule is pinned at
+  `aa17dbd`, the commit this restamp is made on, which has `vox.media`.
+  Nothing under `vox/` changes on this branch, so moving the pin to its tip
+  changes no code alfred runs.
 
 Importing `vox` loads no adapter, and a test asserts it in a fresh
 interpreter. Products are named in `vox.adapters`; the CLI imports that
@@ -57,7 +74,7 @@ package and resolves `--engine` and `--voice` against it.
 ```sh
 uv sync --extra dev
 uv run pytest                 # tests and both walkthroughs; no engine, no hardware
-uv run vox loop --offline     # the whole closed loop: 1.3 s from the command line here, under half a second of it the loop
+uv run vox loop --offline     # the whole closed loop: 1.1 to 1.4 s from the command line here, about half a second of it the loop
 ```
 
 Against a real engine, with one running:
@@ -156,15 +173,23 @@ they are different questions.
 The media walkthrough proves the client against a stand-in answering a
 script: the contract's spelling, the upload's real length, the answers read
 back, the upload discarded. What an upload says and how its sound measures
-is joe's, and the live check above is where that was seen.
+is joe's, and the live check above is where that was seen. The stand-in
+refuses some of what joe refuses, and some of what joe takes; README's
+*Against joe's media API* says which, so an offline pass is not read as a
+live one.
 
 ## Where the rest is written down
 
-The cross-repository state — what is merged, what is open, what is waiting
-on a person — is in the QM corpus, not here:
+The cross-repository state of the voice loop — what is merged, what is
+open, what is waiting on a person — is in the QM corpus, not here:
 
 - `handbook/handoffs/the-voice-loop.md` — the state
-- `handbook/handoffs/hil-review-2026-09-27.md` — what needs deciding
+- `handbook/handoffs/hil-review-2026-10-04.md` — the open set, reviewed as
+  one, and what needs deciding
+- `handbook/handoffs/voice-set-landing.md` — how far that set's landing has
+  got
 
 This repository carries no `governance/qm` submodule, so those are read from
-a `qm` checkout or from the host.
+a `qm` checkout or from the host. The media surface is on none of those
+pages at this stamp; alfred's `CHANGELOG.md` and `docs/captions.md`, on its
+`integrate/wave-3`, say how alfred reaches joe through it.
