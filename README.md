@@ -1,20 +1,29 @@
 # vox
 
 The voice-interaction seam. vox wires speech-to-text and text-to-speech
-together into one small adapter that a consuming repo vendors — it owns no
-audio DSP, and it names no engine.
+together into one small adapter that a consuming repo vendors, and carries
+media -- audio, or a video's sound -- to an engine that transcribes and
+measures it. It owns no audio DSP, and it names no engine.
 
 ```
 mic/file --> speech engine (STT over HTTP) --> transcript --> vox TTS --> audio out
                     ^                                                        |
                     |                                                        v
                     +---------------- round_trip reads it back --------------+
+
+audio or video --> MediaEngine.upload --+--> transcribe --> segments and words, timed
+                   (the same engine,    |
+                    its media surface)  +--> analyze ----> tempo, beats, onsets,
+                                                           loudness, silences, peaks
 ```
 
 - **`EngineContract`** states what an HTTP speech engine must answer: the
   paths, the parameter names, the response keys. It is a value, so pointing
   vox at a different engine is a constructor argument rather than a new class.
 - **`HttpSTT`** drives any engine matching one.
+- **`MediaEngine`** drives the contract's media surface: it uploads audio or
+  a video, and reads back its transcript with times and what its sound
+  measures, as dataclasses.
 - **`TextToSpeech`** is the synthesis protocol, with three backends:
   `recording` (a codec, deterministic, not audible as words), `formant`
   (audible, deterministic, nothing to install) and `pyttsx3` (a real system
@@ -144,9 +153,52 @@ on pyttsx3's own playback.
 costs far more than a request to a local engine. Close it with `close()` or
 use it as a context manager; a client passed in is the caller's to close.
 
-`tests/test_contract.py` runs the whole closed loop against a contract that
-shares no path, no parameter name and no response key with the default, so a
-seam that only works one way fails it.
+`tests/test_contract.py` runs the whole closed loop and the whole media
+surface against a contract that shares no path, no parameter name and no
+response key with the default, so a seam that only works one way fails it.
+
+## Media: a transcript with times, and what the sound measures
+
+An engine that names a media surface takes an upload -- an audio file, or a
+video whose sound it extracts -- and answers its transcript, timed, and what
+its sound measures. `MediaEngine` drives it:
+
+```python
+from vox import EngineContract, MediaEngine
+
+with MediaEngine(EngineContract(), "http://127.0.0.1:8010") as engine:
+    upload = engine.upload("mix.wav", "audio/wav")         # a path, or bytes
+    transcript = engine.transcribe(upload, language="en")
+    analysis = engine.analyze(upload, ["beats", "silences", "peaks"])
+```
+
+- **What comes back is dataclasses**, not the engine's JSON: a `MediaHandle`
+  (`media_id`, `duration`, `sample_rate`, `channels`, `has_audio`); a
+  `Transcript` (`text`, `language`, `segments`, `info`) of `Segment`s
+  (`start`, `end`, `text`, `words`), each word a `Word` (`start`, `end`,
+  `word`, `probability`), timed in seconds of the upload; an `Analysis`
+  (`duration`, `tempo`, `beats`, `onsets`, `loudness`, `silences`, `peaks`);
+  and from `capabilities()`, what the engine takes and offers.
+- **A feature is asked for by vox's name**, the `Analysis` field, and the
+  contract names the engine's: `vox.adapters.joe` asks for `silence` and
+  reads the answer under `silences`.
+- **What the contract leaves None is refused by name, before any request**,
+  with `EngineDoesNotOffer`. A language asked of an engine that cannot be
+  told one is refused rather than dropped: the transcript would be in a
+  language nobody asked for. `words` travels only under the contract's own
+  spelling, and a contract without one gets the words its engine gives.
+- **Every failure names the engine's URL.** `EngineUnavailable` when nothing
+  answered in time; `EngineRefused`, with the engine's `status` and its
+  `detail`, when it refused; `EngineAnswerMalformed`, saying where, when the
+  answer is not the shape the contract describes. Each is an `EngineError`,
+  rebuilt whole from its arguments, so a task queue can carry one.
+- **Leaving the block discards every upload the engine still holds**, and
+  `close(upload)` discards one. Neither raises: an upload the engine cannot
+  be told to drop expires on its own clock.
+
+A route addressing one upload carries `{media_id}` where the id goes, and a
+contract whose route lacks it is refused when it is built. Calls block until
+the engine answers; from an event loop, run them in a worker thread.
 
 ## The offline engine
 
@@ -174,6 +226,15 @@ fails the offline suite rather than a live run:
   the pauses, hints, announcements and watches each one carried, for a test
   to assert on; the engine itself has no speaker to wait for and no
   microphone to open early.
+- **It answers the media surface from a script.** It takes an upload in the
+  stood-in engine's formats and reads a WAV's length from its header,
+  answering 415 for a type it does not take, 413 past its limit, and 422 for
+  a body it cannot decode, which is anything but a WAV. A transcribe answers
+  `EngineState.transcript` and an analyze `EngineState.analysis`, so nothing
+  about what an upload says is measured. An unknown upload is 404 on every
+  route, and no id is handed out twice. `media_transport(state)` answers the
+  same surface in-process, as an `httpx.MockTransport`, for a client built
+  around it.
 
 ## What runs, and what it records
 

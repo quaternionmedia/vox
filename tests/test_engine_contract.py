@@ -9,12 +9,31 @@ the commit is named so a reader can diff rather than re-derive.
 These drive the engine through `HttpSTT`, unmodified, over a real socket: a
 client that needed a change to talk to the stand-in would mean the stand-in
 is not standing in.
+
+The media surface's expectations are read off the statement of joe's media
+API in the QM wave-3 lane brief (V1), which joe's `feat/video-audio-engine`
+implements: the routes under `/api/media`, the keys of each answer, 415 for
+a type it does not take, 422 for an upload with no decodable audio, and
+`{"detail": ...}` for every refusal.
 """
+
+import io
+import wave
 
 import httpx
 import pytest
 
-from vox.engine import EngineState, encode_wav, serve
+from vox.engine import EngineState, encode_wav, media_transport, serve
+from vox.media import (
+    Analysis,
+    Loudness,
+    MediaEngine,
+    Peaks,
+    Segment,
+    Silence,
+    Transcript,
+    Word,
+)
 from vox.stt import HttpSTT
 
 
@@ -251,3 +270,194 @@ def test_joestt_reports_an_unreachable_engine_rather_than_raising(tmp_path):
     stt = HttpSTT(f"http://127.0.0.1:{dead_port}", timeout=0.25)
     assert stt.reachable() is False
     assert stt.devices() == {"devices": [], "microphone_available": False}
+
+
+# --- the media surface ------------------------------------------------------------------
+
+
+def _wav(seconds: float, rate: int = 16000, channels: int = 1) -> bytes:
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(b"\x00\x00" * channels * int(seconds * rate))
+    return buffer.getvalue()
+
+
+SAID = Transcript("Hold.", "en", (Segment(0.0, 0.5, " Hold.", (Word(0.0, 0.5, " Hold.", 0.9),)),), {"model": "x"})
+MEASURED = Analysis(tempo=100.0, beats=(0.1,), onsets=(0.0,), loudness=Loudness(-20.0, -6.0, None),
+                    silences=(Silence(0.5, 1.0),), peaks=Peaks(2.0, (0.5, 0.0)))
+
+
+@pytest.fixture
+def media_engine():
+    """A running engine whose media surface answers a script, and one client
+    for every request to it: a client per request costs more than the request."""
+    with (
+        serve(EngineState(transcript=SAID, analysis=MEASURED)) as (base_url, state),
+        httpx.Client(base_url=base_url) as client,
+    ):
+        yield client, state
+
+
+def _upload(client: httpx.Client, body: bytes, content_type: str = "audio/wav") -> httpx.Response:
+    return client.post("/api/media", content=body, headers={"Content-Type": content_type})
+
+
+def test_a_media_upload_answers_v1_s_five_keys_with_201(media_engine):
+    client, _ = media_engine
+
+    resp = _upload(client, _wav(0.75, rate=8000, channels=2))
+
+    assert resp.status_code == 201
+    assert resp.json() == {"media_id": "m1", "duration": 0.75, "sample_rate": 8000, "channels": 2,
+                           "has_audio": True}
+
+
+def test_a_media_upload_reads_its_type_without_parameters_or_case(media_engine):
+    client, _ = media_engine
+
+    assert _upload(client, _wav(0.1), "Video/MP4; codecs=avc1").status_code == 201
+
+
+@pytest.mark.parametrize(("content_type", "body", "status"), [
+    ("text/plain", _wav(0.1), 415),
+    ("image/png", _wav(0.1), 415),
+    ("audio/wav", b"ID3 not a wav", 422),
+    ("video/mp4", b"\x00\x00\x00\x18ftypmp42", 422),
+    ("audio/wav", _wav(0.0), 422),
+], ids=["text", "image", "undecodable", "a-video-it-cannot-decode", "silent"])
+def test_a_media_upload_refuses_what_v1_refuses_with_a_detail(media_engine, content_type, body, status):
+    """415 for a type it does not take, 422 for an upload with no decodable
+    audio. The stand-in decodes a WAV and nothing else, so anything else it
+    takes is undecodable to it.
+
+    Seen to fail with the type check removed: the text and the image, WAV
+    bodies under the wrong type, were answered 201 and held."""
+    client, state = media_engine
+
+    resp = _upload(client, body, content_type)
+
+    assert resp.status_code == status
+    assert set(resp.json()) == {"detail"}
+    assert state.uploads == {}
+
+
+def test_a_media_upload_over_its_limit_is_refused_413():
+    with serve(EngineState(media_limit=1000)) as (base_url, state), httpx.Client(base_url=base_url) as client:
+        resp = _upload(client, _wav(1.0))
+
+    assert resp.status_code == 413
+    assert state.uploads == {}
+
+
+def test_a_media_transcript_answers_v1_s_keys(media_engine):
+    client, _ = media_engine
+    _upload(client, _wav(1.0))
+
+    body = client.post("/api/media/m1/transcribe", params={"words": "true"}).json()
+
+    assert set(body) == {"text", "language", "segments", "info"}
+    assert set(body["segments"][0]) == {"start", "end", "text", "words"}
+    assert set(body["segments"][0]["words"][0]) == {"start", "end", "word", "probability"}
+
+
+def test_a_media_transcript_without_words_answers_segments_without_them(media_engine):
+    client, _ = media_engine
+    _upload(client, _wav(1.0))
+
+    body = client.post("/api/media/m1/transcribe", params={"words": "false"}).json()
+    refused = client.post("/api/media/m1/transcribe", params={"words": "maybe"})
+
+    assert set(body["segments"][0]) == {"start", "end", "text"}
+    assert refused.status_code == 422
+
+
+def test_a_media_analysis_answers_its_duration_and_each_feature_asked_for(media_engine):
+    """`silence` asked for, `silences` answered, as V1 states it."""
+    client, _ = media_engine
+    _upload(client, _wav(1.0))
+
+    some = client.post("/api/media/m1/analyze", params={"features": "tempo,silence"}).json()
+    every = client.post("/api/media/m1/analyze").json()
+
+    assert some == {"duration": 1.0, "tempo": 100.0, "silences": [{"start": 0.5, "end": 1.0}]}
+    assert set(every) == {"duration", "tempo", "beats", "onsets", "loudness", "silences", "peaks"}
+    assert every["loudness"] == {"rms_db": -20.0, "peak_db": -6.0, "lufs": None}
+    assert every["peaks"] == {"rate": 2.0, "values": [0.5, 0.0]}
+
+
+def test_a_media_analysis_refuses_a_feature_it_does_not_measure(media_engine):
+    client, _ = media_engine
+    _upload(client, _wav(1.0))
+
+    resp = client.post("/api/media/m1/analyze", params={"features": "tempo,silences"})
+
+    assert resp.status_code == 400
+    assert "silences" in resp.json()["detail"]
+
+
+def test_media_capabilities_answer_v1_s_keys(media_engine):
+    client, _ = media_engine
+
+    body = client.get("/api/media/capabilities").json()
+
+    assert set(body) == {"formats", "features", "speech_model", "word_timestamps"}
+    assert body["features"] == ["tempo", "beats", "onsets", "loudness", "silence", "peaks"]
+
+
+def test_a_media_delete_discards_and_an_unknown_upload_is_404_on_every_route(media_engine):
+    client, state = media_engine
+    _upload(client, _wav(1.0))
+
+    deleted = client.delete("/api/media/m1")
+    after = [
+        client.post("/api/media/m1/transcribe"),
+        client.post("/api/media/m1/analyze"),
+        client.delete("/api/media/m1"),
+    ]
+
+    assert deleted.status_code == 200 and state.uploads == {}
+    assert [r.status_code for r in after] == [404, 404, 404]
+    assert after[0].json() == {"detail": "No such media: m1"}
+
+
+def test_a_media_id_is_never_reused(media_engine):
+    """An id handed out once names that upload alone, deleted or not."""
+    client, _ = media_engine
+    first = _upload(client, _wav(0.1))
+    client.delete("/api/media/m1")
+    second = _upload(client, _wav(0.1))
+
+    assert (first.json()["media_id"], second.json()["media_id"]) == ("m1", "m2")
+
+
+def test_the_media_surface_answers_the_same_over_a_socket_and_in_process(tmp_path):
+    """`media_transport` is the same engine with no socket: the same answers
+    to the same requests, recorded the same way."""
+    path = tmp_path / "mix.wav"
+    path.write_bytes(_wav(1.25))
+
+    def run(media: MediaEngine) -> list:
+        upload = media.upload(path, "audio/wav")
+        results = [upload, media.transcribe(upload, language="de"), media.analyze(upload, ["beats", "peaks"]),
+                   media.capabilities()]
+        try:
+            media.upload(b"plain", "text/plain")
+        except Exception as exc:  # noqa: BLE001 -- the refusal is one of the answers compared
+            results.append((type(exc).__name__, exc.status, exc.detail))
+        return results
+
+    over_a_socket = EngineState(transcript=SAID, analysis=MEASURED)
+    with serve(over_a_socket) as (base_url, _), MediaEngine(over_a_socket.contract, base_url) as media:
+        sent = run(media)
+
+    in_process = EngineState(transcript=SAID, analysis=MEASURED)
+    with httpx.Client(transport=media_transport(in_process)) as client, \
+            MediaEngine(in_process.contract, "http://vox.engine", client=client) as media:
+        answered = run(media)
+
+    assert sent == answered
+    assert over_a_socket.requests == in_process.requests
+    assert over_a_socket.requests[-1] == "/api/media/m1"

@@ -15,24 +15,51 @@ file's samples and `decode_wav` reads it back, so a round trip proves the
 seam — the HTTP contract, the file handoff, the orchestration, the loop
 closing — and nothing about transcription accuracy, which is checked against
 a real engine as a separate claim.
+
+**A script, not a hearing.** On the contract's media surface it takes an
+upload, reads a WAV's length from its header, and answers the transcript and
+the analysis it was handed in `EngineState`, so `vox.media.MediaEngine` runs
+unmodified against it and nothing about what an upload says is measured.
+`media_transport` answers that surface in-process, with no socket.
 """
 
 from __future__ import annotations
 
+import functools
+import io
+import itertools
 import json
 import os
+import re
 import threading
 import wave
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
-from vox.contract import EngineContract
+import httpx
+
+from vox.contract import MEDIA_ID, EngineContract
+from vox.media import FEATURES, Analysis, MediaHandle, Transcript
 
 SAMPLE_RATE = 16000
 """16 kHz, which is what speech models resample to anyway."""
+
+MEDIA_FORMATS = (
+    "audio/wav", "audio/wave", "audio/x-wav", "audio/mpeg", "audio/ogg", "audio/flac",
+    "audio/mp4", "audio/aac", "audio/webm",
+    "video/mp4", "video/quicktime", "video/webm", "video/x-matroska",
+)
+"""The content types the media upload takes: the audio and video formats of
+the engine it stands in for. Whatever the declared type, only a WAV body is
+decoded, as an engine decodes by content; anything else is answered 422."""
+
+MEDIA_LIMIT = 100 * 1024 * 1024
+"""The most bytes the media upload takes, the cap of the engine it stands in
+for on its audio uploads. A larger upload is answered 413."""
 
 MAGIC = b"VOX1"
 """Marks a WAV as written by `encode_wav`.
@@ -93,7 +120,9 @@ def decode_wav(path: str | os.PathLike[str]) -> str:
 
 @dataclass
 class EngineState:
-    """What the running engine will answer with. Set it before `serve()`, not during."""
+    """What the running engine will answer with. Set it before `serve()`, not
+    during; `uploads` and the records below are the engine's own, written as
+    it serves."""
 
     audio_dirs: list[Path] = field(default_factory=list)
     """Where `transcribe` looks for a filename, in order."""
@@ -144,6 +173,30 @@ class EngineState:
     one closed, in order. The engine has no microphone to open early, so a
     watch changes nothing it does; recording it is how a test sees it arrived."""
 
+    transcript: Transcript | None = None
+    """What the media surface's transcribe answers, for any upload: the test's
+    script for what was said in it. None answers an empty transcript. Asked
+    for no words, it answers the segments without theirs; asked for a
+    language, it answers that one."""
+
+    analysis: Analysis | None = None
+    """What the media surface's analyze answers for each feature asked for,
+    for any upload: the test's script for what its sound measures. A feature
+    the script leaves None is answered null, and so is every feature when
+    the script is None. The duration answered is the upload's own."""
+
+    media_formats: tuple[str, ...] = MEDIA_FORMATS
+    """The content types an upload is taken in. Any other is answered 415."""
+
+    media_limit: int = MEDIA_LIMIT
+    """The most bytes an upload may be. A larger one is answered 413."""
+
+    uploads: dict[str, MediaHandle] = field(default_factory=dict)
+    """What the engine holds, by id: added by an upload, removed by a delete."""
+
+    _ids: Iterator[int] = field(default_factory=lambda: itertools.count(1), init=False,
+                                repr=False, compare=False)
+
 
 class _Handler(BaseHTTPRequestHandler):
     state: EngineState
@@ -164,11 +217,26 @@ class _Handler(BaseHTTPRequestHandler):
             return []
         return [{"index": 0, "name": self.state.microphone, "channels": 1, "default": True}]
 
+    def _media(self, method: str) -> bool:
+        """Answer the request when it is on the contract's media surface.
+        Returns whether it was; the body is read only when it was."""
+        route = urlparse(self.path)
+        found = _media_route(self.state.contract, method, route.path)
+        if found is None:
+            return False
+        length = int(self.headers.get("Content-Length") or 0)
+        status, body = _answer_media(self.state, found, parse_qs(route.query),
+                                     self.headers.get("Content-Type") or "", self.rfile.read(length))
+        self._send(status, body)
+        return True
+
     def do_GET(self):  # noqa: N802 — BaseHTTPRequestHandler's spelling
         route = urlparse(self.path)
         contract = self.state.contract
         self.state.requests.append(self.path)
 
+        if self._media("GET"):
+            return
         if route.path == contract.health:
             # `engine` is vox's own addition on top of whatever an engine's
             # health body carries: a caller that binds an ephemeral port still
@@ -189,6 +257,8 @@ class _Handler(BaseHTTPRequestHandler):
         contract = self.state.contract
         self.state.requests.append(self.path)
 
+        if self._media("POST"):
+            return
         if route.path == contract.transcribe:
             self._transcribe(query.get(contract.filename_param, [""])[0])
         elif route.path == contract.listen:
@@ -218,6 +288,11 @@ class _Handler(BaseHTTPRequestHandler):
             self.state.watches.append(None)
             self._send(200, {"watching": False})
         else:
+            self._send(404, {"detail": "Not Found"})
+
+    def do_DELETE(self):  # noqa: N802
+        self.state.requests.append(self.path)
+        if not self._media("DELETE"):
             self._send(404, {"detail": "Not Found"})
 
     def _transcribe(self, filename: str) -> None:
@@ -266,6 +341,197 @@ class _Handler(BaseHTTPRequestHandler):
             if contract.confidence_key and self.state.confidence is not None:
                 body[contract.confidence_key] = self.state.confidence
             self._send(200, body)
+
+
+# ── The media surface ────────────────────────────────────────────────────────
+
+_MEDIA_ROUTES = (
+    ("upload", "POST", "media_upload"),
+    ("capabilities", "GET", "media_capabilities"),
+    ("transcribe", "POST", "media_transcribe"),
+    ("analyze", "POST", "media_analyze"),
+    ("delete", "DELETE", "media_delete"),
+)
+
+_FLAGS = {"true": True, "1": True, "yes": True, "on": True,
+          "false": False, "0": False, "no": False, "off": False}
+"""What the stood-in engine's framework reads as a boolean parameter."""
+
+
+@functools.lru_cache(maxsize=64)
+def _route_pattern(template: str) -> re.Pattern[str]:
+    head, _, tail = template.partition(MEDIA_ID)
+    return re.compile(re.escape(head) + "(?P<media_id>[^/]+)" + re.escape(tail))
+
+
+def _media_route(contract: EngineContract, method: str, path: str) -> tuple[str, str | None] | None:
+    """Which media route `method` and `path` ask for, with the upload's id
+    when the route names one. None when they are not on the media surface."""
+    for name, verb, attribute in _MEDIA_ROUTES:
+        template = getattr(contract, attribute)
+        if verb != method or not template:
+            continue
+        if MEDIA_ID not in template:
+            if path == template:
+                return name, None
+            continue
+        match = _route_pattern(template).fullmatch(path)
+        if match:
+            return name, unquote(match["media_id"])
+    return None
+
+
+def _probe_wav(body: bytes) -> tuple[int, int, int] | None:
+    """A WAV body's frames, rate and channels; None for anything else."""
+    try:
+        with wave.open(io.BytesIO(body), "rb") as wav:
+            frames, rate, channels = wav.getnframes(), wav.getframerate(), wav.getnchannels()
+    except (wave.Error, EOFError):
+        return None
+    return (frames, rate, channels) if rate > 0 else None
+
+
+def _answer_media(state: EngineState, route: tuple[str, str | None], query: dict[str, list[str]],
+                  content_type: str, body: bytes) -> tuple[int, dict]:
+    """Answer one request on the media surface, under the contract's keys."""
+    name, media_id = route
+    contract = state.contract
+    if name == "upload":
+        return _media_upload(state, content_type, body)
+    if name == "capabilities":
+        return 200, {
+            contract.formats_key: list(state.media_formats),
+            contract.features_key: [
+                getattr(contract, f"{n}_feature") for n in FEATURES if getattr(contract, f"{n}_feature")
+            ],
+            # It has no speech model; the transcript it answers is the script.
+            contract.speech_model_key: None,
+            contract.word_timestamps_key: True,
+        }
+    upload = state.uploads.get(media_id)
+    if upload is None:
+        # An unknown id and an expired one are the same answer.
+        return 404, {contract.detail_key: f"No such media: {media_id}"}
+    if name == "transcribe":
+        return _media_transcribe(state, query)
+    if name == "analyze":
+        return _media_analyze(state, upload, query)
+    del state.uploads[media_id]
+    return 200, {contract.media_id_key: media_id}
+
+
+def _media_upload(state: EngineState, content_type: str, body: bytes) -> tuple[int, dict]:
+    contract = state.contract
+    if len(body) > state.media_limit:
+        return 413, {contract.detail_key: f"Upload too large (max {state.media_limit} bytes)"}
+    kind = content_type.split(";")[0].strip().lower()
+    if kind not in state.media_formats:
+        allowed = ", ".join(state.media_formats)
+        return 415, {contract.detail_key: f"Unsupported media type {kind!r}. Allowed: {allowed}"}
+    probed = _probe_wav(body)
+    if probed is None:
+        return 422, {contract.detail_key: "No decodable audio in the upload (vox.engine decodes WAV only)"}
+    frames, rate, channels = probed
+    if frames == 0:
+        return 422, {contract.detail_key: "No audio in the upload"}
+    handle = MediaHandle(f"m{next(state._ids)}", frames / rate, rate, channels, True)
+    state.uploads[handle.media_id] = handle
+    return 201, {
+        contract.media_id_key: handle.media_id,
+        contract.duration_key: handle.duration,
+        contract.sample_rate_key: handle.sample_rate,
+        contract.channels_key: handle.channels,
+        contract.has_audio_key: handle.has_audio,
+    }
+
+
+def _media_transcribe(state: EngineState, query: dict[str, list[str]]) -> tuple[int, dict]:
+    contract = state.contract
+    words = True
+    if contract.words_param and contract.words_param in query:
+        words = _FLAGS.get(query[contract.words_param][0].lower())
+        if words is None:
+            return 422, {contract.detail_key: f"{contract.words_param} must be true or false"}
+    language = query.get(contract.language_param, [None])[0] if contract.language_param else None
+    script = state.transcript or Transcript(text="", language=None, segments=())
+    segments = []
+    for segment in script.segments:
+        shown = {contract.start_key: segment.start, contract.end_key: segment.end,
+                 contract.text_key: segment.text}
+        if words:
+            shown[contract.words_key] = [
+                {contract.start_key: w.start, contract.end_key: w.end,
+                 contract.word_key: w.word, contract.probability_key: w.probability}
+                for w in segment.words
+            ]
+        segments.append(shown)
+    return 200, {
+        contract.text_key: script.text,
+        contract.language_key: language or script.language,
+        contract.segments_key: segments,
+        contract.info_key: dict(script.info),
+    }
+
+
+def _media_analyze(state: EngineState, upload: MediaHandle, query: dict[str, list[str]]) -> tuple[int, dict]:
+    contract = state.contract
+    offered = {getattr(contract, f"{n}_feature"): n for n in FEATURES if getattr(contract, f"{n}_feature")}
+    if contract.features_param and contract.features_param in query:
+        names = [n.strip() for n in query[contract.features_param][0].split(",") if n.strip()]
+        unknown = [n for n in names if n not in offered]
+        if unknown or not names:
+            return 400, {contract.detail_key: f"Unknown feature(s): {', '.join(unknown) or 'none named'}. "
+                                              f"Offered: {', '.join(offered)}"}
+        asked = [offered[n] for n in names]
+    else:
+        asked = list(offered.values())
+    script = state.analysis or Analysis()
+    body: dict = {contract.duration_key: upload.duration}
+    for name in asked:
+        body[getattr(contract, f"{name}_key")] = _shown_feature(name, getattr(script, name), contract)
+    return 200, body
+
+
+def _shown_feature(name: str, value, contract: EngineContract):
+    """One feature of the script, as the engine writes it under `contract`."""
+    if value is None:
+        return None
+    if name == "loudness":
+        return {contract.rms_db_key: value.rms_db, contract.peak_db_key: value.peak_db,
+                contract.lufs_key: value.lufs}
+    if name == "silences":
+        return [{contract.start_key: s.start, contract.end_key: s.end} for s in value]
+    if name == "peaks":
+        return {contract.peaks_rate_key: value.rate, contract.peaks_values_key: list(value.values)}
+    if name in ("beats", "onsets"):
+        return list(value)
+    return value
+
+
+def media_transport(state: EngineState) -> httpx.MockTransport:
+    """The media surface in-process: an `httpx.MockTransport` answering
+    `state`'s contract as `serve` does, with no socket.
+
+        client = httpx.Client(transport=media_transport(state))
+        engine = MediaEngine(state.contract, "http://vox.engine", client=client)
+
+    It answers the media routes; anything else is answered 404, and the voice
+    routes are served over the socket alone. Each request is recorded in
+    `state.requests`, path and query as sent.
+    """
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        target = request.url.raw_path.decode("ascii")
+        state.requests.append(target)
+        route = urlparse(target)
+        found = _media_route(state.contract, request.method, route.path)
+        if found is None:
+            return httpx.Response(404, json={"detail": "Not Found"})
+        status, body = _answer_media(state, found, parse_qs(route.query),
+                                     request.headers.get("Content-Type", ""), request.content)
+        return httpx.Response(status, json=body)
+
+    return httpx.MockTransport(answer)
 
 
 @contextmanager

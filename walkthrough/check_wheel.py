@@ -26,6 +26,7 @@ REQUIRED = [
     "vox/__init__.py",
     "vox/contract.py",
     "vox/engine.py",
+    "vox/media.py",
     "vox/session.py",
     "vox/stt.py",
     "vox/synth.py",

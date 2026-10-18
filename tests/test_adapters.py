@@ -334,3 +334,16 @@ def test_the_joe_adapter_names_its_watch_and_control():
 
     assert (JOE.watch, JOE.unwatch, JOE.control, JOE.interrupted_key) == (
         "/api/voice/watch", "/api/voice/unwatch", "/api/voice/control", "interrupted")
+
+
+def test_the_joe_adapter_names_its_media_surface():
+    """joe's media API as its statement spells it: the routes under
+    `/api/media`, and silences asked for as `silence` and answered as
+    `silences`."""
+    from vox.adapters import JOE
+
+    assert (JOE.media_upload, JOE.media_capabilities, JOE.media_transcribe, JOE.media_analyze,
+            JOE.media_delete) == ("/api/media", "/api/media/capabilities", "/api/media/{media_id}/transcribe",
+                                  "/api/media/{media_id}/analyze", "/api/media/{media_id}")
+    assert (JOE.silences_feature, JOE.silences_key) == ("silence", "silences")
+    assert (JOE.language_param, JOE.words_param, JOE.features_param) == ("language", "words", "features")
