@@ -37,6 +37,7 @@ from vox.media import (
     Segment,
     Silence,
     Transcript,
+    UploadTooLarge,
     Word,
 )
 
@@ -111,13 +112,15 @@ def _failing(error: Exception, seen: list | None = None) -> httpx.Client:
 
 
 def test_an_upload_of_bytes_comes_back_as_its_handle(engine):
+    """The engine is asked first what it takes, once, for the size it states."""
     media, state = engine
 
     upload = media.upload(_wav(1.5), "audio/wav")
+    media.upload(_wav(0.5), "audio/wav")
 
     assert upload == MediaHandle(media_id="m1", duration=1.5, sample_rate=16000, channels=1, has_audio=True)
-    assert state.requests == ["/api/media"]
-    assert set(state.uploads) == {"m1"}
+    assert state.requests == ["/api/media/capabilities", "/api/media", "/api/media"]
+    assert set(state.uploads) == {"m1", "m2"}
 
 
 def test_an_upload_from_a_path_is_streamed_with_its_length_and_type(tmp_path):
@@ -131,8 +134,8 @@ def test_an_upload_from_a_path_is_streamed_with_its_length_and_type(tmp_path):
     with _answering(201, answer, seen=seen) as client:
         upload = MediaEngine(EngineContract(), BASE, client=client).upload(path, "audio/wav")
 
-    (request,) = seen
-    assert request.method == "POST" and request.url == f"{BASE}/api/media"
+    (request,) = [r for r in seen if r.method == "POST"]
+    assert request.url == f"{BASE}/api/media"
     assert request.headers["content-type"] == "audio/wav"
     assert request.headers["content-length"] == str(path.stat().st_size)
     assert request.content == path.read_bytes()
@@ -231,6 +234,48 @@ def test_a_feature_is_asked_for_by_the_engine_s_name_and_read_back_by_vox_s(engi
     assert analysis == Analysis(duration=2.0, silences=(Silence(1.2, 1.4),))
 
 
+def test_an_analysis_s_tuning_travels_by_the_contract_s_names(engine):
+    """How many peak values a second, and what a silence is, sent only when
+    asked: the engine's own defaults stand otherwise."""
+    media, state = engine
+    upload = media.upload(_wav(2.0), "audio/wav")
+
+    media.analyze(upload, ["peaks", "silences"], peaks_rate=100, silence_db=-30.0, silence_min=0.25)
+    media.analyze(upload, ["peaks"])
+
+    assert state.requests[-2:] == [
+        "/api/media/m1/analyze?features=peaks%2Csilence&peaks_rate=100&silence_db=-30.0&silence_min=0.25",
+        "/api/media/m1/analyze?features=peaks",
+    ]
+
+
+def test_a_tuning_the_engine_refuses_is_refused_with_its_reason(engine):
+    media, _ = engine
+    upload = media.upload(_wav(), "audio/wav")
+
+    with pytest.raises(EngineRefused) as refused:
+        media.analyze(upload, ["peaks"], peaks_rate=5000)
+
+    assert (refused.value.status, refused.value.detail) == (422, "peaks_rate must be an integer from 1 to 1000")
+
+
+@pytest.mark.parametrize(("tuning", "missing"), [
+    ({"peaks_rate": 10}, "peaks_rate_param"),
+    ({"silence_db": -50.0}, "silence_db_param"),
+    ({"silence_min": 1.0}, "silence_min_param"),
+])
+def test_a_tuning_the_contract_cannot_carry_is_refused_before_any_request(tuning, missing):
+    """It changes the answer, so it is not dropped.
+
+    Seen to fail by dropping it: the analysis went out without it."""
+    seen: list = []
+    with _answering(200, {}, seen=seen) as client:
+        media = MediaEngine(replace(EngineContract(), **{missing: None}), BASE, client=client)
+        with pytest.raises(EngineDoesNotOffer, match=f"its contract names no {missing}"):
+            media.analyze("m1", **tuning)
+    assert seen == []
+
+
 def test_one_feature_can_be_named_alone(engine):
     media, _ = engine
     upload = media.upload(_wav(), "audio/wav")
@@ -310,7 +355,8 @@ def test_leaving_the_block_discards_what_this_engine_still_holds():
 
     assert state.uploads == {}
     assert state.requests == [
-        "/api/media", "/api/media", f"/api/media/{dropped.media_id}", f"/api/media/{held.media_id}",
+        "/api/media/capabilities", "/api/media", "/api/media",
+        f"/api/media/{dropped.media_id}", f"/api/media/{held.media_id}",
     ]
 
 
@@ -466,6 +512,45 @@ def test_an_engine_too_slow_to_answer_is_unavailable_and_says_how_long_it_was_gi
     )
 
 
+def test_an_engine_not_reached_in_time_says_so_and_how_long_reaching_it_was_given():
+    with _failing(httpx.ConnectTimeout("timed out")) as client:
+        media = MediaEngine(EngineContract(), BASE, client=client, connect_timeout=3.0)
+        with pytest.raises(EngineUnavailable) as unavailable:
+            media.transcribe("m1")
+
+    assert str(unavailable.value) == (
+        f"the engine at {BASE} did not answer POST /api/media/m1/transcribe: not reached within 3 seconds"
+    )
+
+
+def test_reaching_the_engine_is_bounded_apart_from_how_long_it_works():
+    """An answer may take `timeout` -- a transcript of a long upload takes
+    minutes -- while reaching the engine takes `connect_timeout` at most, and
+    never longer than the answer may; a quick call is quick throughout.
+
+    Seen to fail by giving reaching the engine the answer's wait: a
+    transcript's connect timeout read 1800."""
+    seen: list[tuple[str, dict]] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, request.extensions["timeout"]))
+        if request.url.path.endswith("/transcribe"):
+            return httpx.Response(200, json={"text": "", "segments": []})
+        return httpx.Response(200, json={"formats": [], "features": []})
+
+    with httpx.Client(transport=httpx.MockTransport(answer)) as client:
+        media = MediaEngine(EngineContract(), BASE, client=client)
+        media.transcribe("m1")
+        media.capabilities()
+        MediaEngine(EngineContract(), BASE, timeout=0.5, client=client).transcribe("m1")
+
+    assert seen == [
+        ("/api/media/m1/transcribe", {"connect": 10.0, "read": 1800.0, "write": 1800.0, "pool": 1800.0}),
+        ("/api/media/capabilities", {"connect": 10.0, "read": 10.0, "write": 10.0, "pool": 10.0}),
+        ("/api/media/m1/transcribe", {"connect": 0.5, "read": 0.5, "write": 0.5, "pool": 0.5}),
+    ]
+
+
 def test_a_refusal_carries_the_engine_s_status_and_reason(engine):
     """Seen to fail by raising the refusal without its reason: `detail` read
     the status's own phrase, and the engine's explanation was lost."""
@@ -479,19 +564,79 @@ def test_a_refusal_carries_the_engine_s_status_and_reason(engine):
     assert str(refused.value).startswith(f"the engine at {BASE} refused POST /api/media with 415: ")
 
 
-@pytest.mark.parametrize(("source", "status", "detail"), [
-    (b"RIFF but nothing after it", 422, "No decodable audio in the upload"),
-    (_wav(0.0), 422, "No audio in the upload"),
-    (_wav(2.0), 413, "Upload too large"),
-], ids=["undecodable", "silent", "too-large"])
-def test_an_upload_the_engine_cannot_take_is_refused_with_its_reason(source, status, detail):
-    state = EngineState(media_limit=len(_wav(1.0)))
-    with httpx.Client(transport=media_transport(state)) as client, pytest.raises(EngineRefused) as refused:
-        MediaEngine(state.contract, BASE, client=client).upload(source, "audio/wav")
+@pytest.mark.parametrize(("source", "detail"), [
+    (b"RIFF but nothing after it", "No decodable audio in the upload"),
+    (_wav(0.0), "No audio in the upload"),
+], ids=["undecodable", "silent"])
+def test_an_upload_the_engine_cannot_take_is_refused_with_its_reason(engine, source, detail):
+    media, state = engine
 
-    assert refused.value.status == status
+    with pytest.raises(EngineRefused) as refused:
+        media.upload(source, "audio/wav")
+
+    assert refused.value.status == 422
     assert refused.value.detail.startswith(detail)
     assert state.uploads == {}
+
+
+def test_an_upload_larger_than_the_engine_takes_is_not_sent():
+    """Held to the `max_bytes` the engine states, before a byte is sent: an
+    engine that judges the declared length and closes the connection would
+    otherwise read as one not answering.
+
+    Seen to fail by sending it anyway: the stand-in answered 413 after the
+    whole body arrived, and nothing was refused before."""
+    state = EngineState(media_limit=len(_wav(1.0)))
+    with httpx.Client(transport=media_transport(state)) as client, pytest.raises(UploadTooLarge) as too_large:
+        MediaEngine(state.contract, BASE, client=client).upload(_wav(2.0), "audio/wav")
+
+    error = too_large.value
+    assert isinstance(error, EngineRefused) and error.status == 413
+    assert (error.size, error.limit) == (len(_wav(2.0)), len(_wav(1.0)))
+    assert str(error) == (f"the engine at {BASE} takes uploads of at most {len(_wav(1.0))} bytes, "
+                          f"and this one is {len(_wav(2.0))}: it was not sent")
+    assert state.requests == ["/api/media/capabilities"]
+
+
+def test_an_engine_that_cannot_say_what_it_takes_is_sent_the_upload():
+    """Asked once, answered with something other than a statement of what it
+    takes, an engine is sent the upload, whose own answer then says."""
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.method == "GET":
+            return httpx.Response(404, json={"detail": "Not Found"})
+        return httpx.Response(201, json={"media_id": "m9", "duration": 1.0})
+
+    with httpx.Client(transport=httpx.MockTransport(answer)) as client:
+        media = MediaEngine(EngineContract(), BASE, client=client)
+        uploads = [media.upload(b"RIFF", "audio/wav"), media.upload(b"RIFF", "audio/wav")]
+
+    assert [u.media_id for u in uploads] == ["m9", "m9"]
+    assert [(r.method, r.url.path) for r in seen] == [
+        ("GET", "/api/media/capabilities"), ("POST", "/api/media"), ("POST", "/api/media"),
+    ]
+
+
+def test_an_upload_whose_connection_closes_says_what_that_can_mean():
+    """An engine that states no limit, and closes the connection on a size it
+    refuses, reads as one not answering; the error says why that can be."""
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"formats": ["audio/wav"], "features": []})
+        raise httpx.WriteError("[WinError 10054] An existing connection was forcibly closed")
+
+    with httpx.Client(transport=httpx.MockTransport(answer)) as client, \
+            pytest.raises(EngineUnavailable) as unavailable:
+        MediaEngine(EngineContract(), BASE, client=client).upload(b"RIFF" * 100, "audio/wav")
+
+    assert str(unavailable.value) == (
+        f"the engine at {BASE} did not answer POST /api/media: [WinError 10054] An existing connection was "
+        "forcibly closed; the connection closed while the upload's 400 bytes were sent, as an engine "
+        "refusing an upload's size can close it"
+    )
 
 
 def test_an_upload_the_engine_does_not_hold_is_refused(engine):
@@ -592,14 +737,16 @@ def test_an_answer_that_is_not_json_is_malformed():
 
 def test_an_absent_or_null_optional_part_is_read_as_none():
     """What an engine may leave out is None, and what it must say is still checked."""
-    answers = iter([
-        {"media_id": "m1", "duration": 1.0},
-        {"text": "", "segments": [{"start": 0.0, "end": 1.0, "text": " hi", "words": None}], "language": None},
-        {"loudness": {"rms_db": None, "peak_db": None}, "silences": [], "peaks": None},
-    ])
+    answers = {
+        "/api/media/capabilities": {"formats": [], "features": []},
+        "/api/media": {"media_id": "m1", "duration": 1.0},
+        "/api/media/m1/transcribe": {"text": "", "segments": [{"start": 0.0, "end": 1.0, "text": " hi",
+                                                               "words": None}], "language": None},
+        "/api/media/m1/analyze": {"loudness": {"rms_db": None, "peak_db": None}, "silences": [], "peaks": None},
+    }
 
     def answer(request):
-        return httpx.Response(200, json=next(answers))
+        return httpx.Response(200, json=answers[request.url.path])
 
     with httpx.Client(transport=httpx.MockTransport(answer)) as client:
         media = MediaEngine(EngineContract(), BASE, client=client)
@@ -694,6 +841,7 @@ def test_a_route_with_no_place_for_the_id_is_refused_when_the_contract_is_built(
     EngineRefused(415, "Unsupported media type", BASE, "POST /api/media"),
     EngineAnswerMalformed("the answer has no 'text'", BASE, "POST /api/media/m1/transcribe"),
     EngineDoesNotOffer("analysis", BASE, "media_analyze"),
+    UploadTooLarge(2048, 1024, BASE, "POST /api/media"),
 ])
 def test_every_error_is_rebuilt_whole_from_its_arguments(error):
     """A task queue that serialises a failed task's error rebuilds it from

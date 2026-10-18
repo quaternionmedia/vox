@@ -27,6 +27,7 @@ from vox.media import (
     Segment,
     Silence,
     Transcript,
+    UploadTooLarge,
     Word,
 )
 from vox.session import VoiceSession
@@ -60,6 +61,9 @@ ALIEN = EngineContract(
     language_param="tongue",
     words_param="each_word",
     features_param="measure",
+    peaks_rate_param="outline_hz",
+    silence_db_param="quiet_below",
+    silence_min_param="quiet_for",
     media_id_key="clip_id",
     duration_key="length_s",
     sample_rate_key="hz",
@@ -378,7 +382,7 @@ def test_the_media_wire_used_this_contract_s_spelling(media):
 
     upload = engine.upload(_wav(0.5), "audio/wav")
     unworded = engine.transcribe(upload, language="fr", words=False)
-    engine.analyze(upload, ["silences", "peaks"])
+    engine.analyze(upload, ["silences", "peaks"], peaks_rate=20, silence_db=-35.0, silence_min=0.3)
     engine.capabilities()
     engine.close(upload)
 
@@ -386,10 +390,12 @@ def test_the_media_wire_used_this_contract_s_spelling(media):
         return route.replace(MEDIA_ID, "m1")
 
     assert state.requests == [
+        contract.media_capabilities,
         contract.media_upload,
         f"{at(contract.media_transcribe)}?{contract.language_param}=fr&{contract.words_param}=false",
         (f"{at(contract.media_analyze)}?{contract.features_param}="
-         f"{contract.silences_feature}%2C{contract.peaks_feature}"),
+         f"{contract.silences_feature}%2C{contract.peaks_feature}&{contract.peaks_rate_param}=20"
+         f"&{contract.silence_db_param}=-35.0&{contract.silence_min_param}=0.3"),
         contract.media_capabilities,
         at(contract.media_delete),
     ]
@@ -419,3 +425,18 @@ def test_a_feature_the_contract_does_not_name_is_refused_on_either_contract(medi
         engine.analyze("m1", ["tempo", "beats"])
 
     assert state.requests == []
+
+
+def test_an_upload_too_large_for_this_contract_s_engine_is_not_sent(media):
+    """The size limit is read under this contract's key for it.
+
+    Seen to fail by reading it under "max_bytes": the alien engine's limit
+    went unread, the upload was sent, and the engine refused it after."""
+    engine, state, contract = media
+    state.media_limit = 1000
+
+    with pytest.raises(UploadTooLarge) as too_large:
+        engine.upload(_wav(0.5), "audio/wav")
+
+    assert too_large.value.limit == 1000
+    assert state.requests == [contract.media_capabilities]

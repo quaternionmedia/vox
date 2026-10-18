@@ -488,8 +488,31 @@ def _media_transcribe(state: EngineState, query: dict[str, list[str]]) -> tuple[
     }
 
 
+def _tuning_refused(contract: EngineContract, query: dict[str, list[str]]) -> str | None:
+    """Why an analysis's tuning is refused, as the stood-in engine's framework
+    refuses it before the route runs; None when it is not."""
+    bounds = (
+        (contract.peaks_rate_param, int, lambda v: 1 <= v <= 1000, "an integer from 1 to 1000"),
+        (contract.silence_db_param, float, lambda v: -120.0 <= v <= 0.0, "a level from -120 to 0"),
+        (contract.silence_min_param, float, lambda v: 0.0 < v <= 3600.0, "more than 0 and at most 3600"),
+    )
+    for name, parse, within, what in bounds:
+        if not name or name not in query:
+            continue
+        try:
+            value = parse(query[name][0])
+        except ValueError:
+            return f"{name} must be {what}"
+        if not within(value):
+            return f"{name} must be {what}"
+    return None
+
+
 def _media_analyze(state: EngineState, upload: MediaHandle, query: dict[str, list[str]]) -> tuple[int, dict]:
     contract = state.contract
+    refused = _tuning_refused(contract, query)
+    if refused:
+        return 422, {contract.detail_key: refused}
     offered = {getattr(contract, f"{n}_feature"): n for n in FEATURES if getattr(contract, f"{n}_feature")}
     named = query.get(contract.features_param, [""])[0] if contract.features_param else ""
     names = [n.strip().lower() for n in named.split(",") if n.strip()]

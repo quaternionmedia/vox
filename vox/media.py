@@ -33,9 +33,16 @@ import httpx
 
 from vox.contract import MEDIA_ID, EngineContract
 
-DEFAULT_TIMEOUT = 300.0
-"""Seconds a media call may take. An engine transcribes the whole upload
-before it answers, so this is long; a caller who knows better passes its own."""
+DEFAULT_TIMEOUT = 1800.0
+"""Seconds an answer may take once the engine is reached. An engine says
+nothing until it has transcribed or measured the whole upload, and whisper
+on a CPU takes minutes over an hour of sound, besides loading its model on
+the first transcript; a caller who knows its uploads are short passes less."""
+
+CONNECT_TIMEOUT = 10.0
+"""Seconds reaching the engine at all may take, apart from how long it then
+works: an engine that is not there is known in seconds, not after the
+answer's long wait."""
 
 QUICK_TIMEOUT = 10.0
 """Seconds asking what an engine offers, or discarding an upload, may take:
@@ -91,6 +98,28 @@ class EngineRefused(EngineError):
 
     def __str__(self) -> str:
         return f"{self._the_engine()} refused{self._asked()} with {self.status}: {self.detail}"
+
+
+class UploadTooLarge(EngineRefused):
+    """An upload larger than the engine says it takes, refused before it was sent.
+
+    An engine can judge an upload's size from its declared length, answer
+    before reading the body and close the connection, and a client still
+    sending can see the connection reset before the refusal reaches it. So
+    the size is checked against the `max_bytes` the engine states, and the
+    upload is not sent at all. It is an `EngineRefused` with the engine's
+    status for it, 413, and `size` and `limit` in bytes.
+    """
+
+    def __init__(self, size: int, limit: int, engine: str = "", request: str = ""):
+        Exception.__init__(self, size, limit, engine, request)
+        self.size, self.limit, self.engine, self.request = size, limit, engine, request
+        self.status = 413
+        self.detail = f"{size} bytes is more than the {limit} it takes"
+
+    def __str__(self) -> str:
+        return (f"{self._the_engine()} takes uploads of at most {self.limit} bytes, and this one is "
+                f"{self.size}: it was not sent")
 
 
 class EngineAnswerMalformed(EngineError):
@@ -473,6 +502,10 @@ class MediaEngine:
     discarded, and releases its HTTP client. `close()` does the same outside
     a block; `close(upload)` discards one.
 
+    `timeout` is how long an answer may take once the engine is reached,
+    and `connect_timeout` how long reaching it may take, never longer than
+    `timeout`: an engine that is not there is known in seconds.
+
     One `httpx.Client` serves every call, built on first use. A client
     passed in is the caller's to close.
 
@@ -486,22 +519,29 @@ class MediaEngine:
         base_url: str,
         timeout: float = DEFAULT_TIMEOUT,
         client: httpx.Client | None = None,
+        *,
+        connect_timeout: float = CONNECT_TIMEOUT,
     ):
         if not base_url:
             raise ValueError("a media engine needs the URL it answers at")
         self.contract = contract or EngineContract()
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.connect_timeout = connect_timeout
         self._client = client
         self._owns_client = client is None
         # Ids this engine uploaded and has not discarded, for `close()`.
         self._held: list[str] = []
+        # What the engine last said it takes and offers, and whether it has
+        # been asked: an upload is checked against its stated size limit.
+        self._stated: Capabilities | None = None
+        self._asked_what_it_takes = False
 
     @property
     def client(self) -> httpx.Client:
         """The shared client, built on first use so construction stays free."""
         if self._client is None:
-            self._client = httpx.Client(timeout=self.timeout)
+            self._client = httpx.Client(timeout=self._timeouts(self.timeout))
         return self._client
 
     def __enter__(self) -> MediaEngine:
@@ -514,18 +554,39 @@ class MediaEngine:
 
     def upload(self, source: str | os.PathLike[str] | bytes, content_type: str) -> MediaHandle:
         """Upload an audio or video file -- a path, or its bytes -- of the given
-        type. Returns the engine's handle for it, held until discarded."""
+        type. Returns the engine's handle for it, held until discarded.
+
+        Its size is first held to the largest upload the engine says it
+        takes, asked once per engine, and a larger one is refused with
+        `UploadTooLarge` and not sent: an engine refusing a size it reads
+        from the declared length can close the connection on a client
+        still sending, which would read as an engine not answering.
+        """
         route = self._offered("media_upload", "uploads")
         if not content_type:
             raise ValueError("an upload needs its content type, such as audio/wav or video/mp4")
+        in_memory = isinstance(source, (bytes, bytearray, memoryview))
+        size = len(source) if in_memory else os.stat(source).st_size
+        limit = self._upload_limit()
+        if limit is not None and size > limit:
+            raise UploadTooLarge(size, limit, self.base_url, f"POST {route}")
         headers = {"Content-Type": content_type}
-        if isinstance(source, (bytes, bytearray, memoryview)):
-            handle = self._ask("POST", route, _read_handle, content=bytes(source), headers=headers)
-        else:
-            # Streamed from the file rather than read into memory: a video can
-            # be large, and the engine reads it as it arrives.
-            with open(source, "rb") as body:
-                handle = self._ask("POST", route, _read_handle, content=body, headers=headers)
+        try:
+            if in_memory:
+                handle = self._ask("POST", route, _read_handle, content=bytes(source), headers=headers)
+            else:
+                # Streamed from the file rather than read into memory: a video
+                # can be large, and the engine reads it as it arrives.
+                with open(source, "rb") as body:
+                    handle = self._ask("POST", route, _read_handle, content=body, headers=headers)
+        except EngineUnavailable as exc:
+            if isinstance(exc.__cause__, (httpx.WriteError, httpx.RemoteProtocolError)):
+                raise EngineUnavailable(
+                    f"{exc.reason}; the connection closed while the upload's {size} bytes were sent, "
+                    f"as an engine refusing an upload's size can close it",
+                    self.base_url, exc.request,
+                ) from exc.__cause__
+            raise
         self._held.append(handle.media_id)
         return handle
 
@@ -549,16 +610,36 @@ class MediaEngine:
             params[self.contract.words_param] = "true" if words else "false"
         return self._ask("POST", self._at(route, handle), _read_transcript, params=params)
 
-    def analyze(self, handle: MediaHandle | str, features: Iterable[str] | None = None) -> Analysis:
+    def analyze(self, handle: MediaHandle | str, features: Iterable[str] | None = None, *,
+                peaks_rate: int | None = None, silence_db: float | None = None,
+                silence_min: float | None = None) -> Analysis:
         """What the upload's sound measures: the `features` asked for, in
         vox's names (`FEATURES`), or every one the contract names when None.
-        A feature the contract does not name is refused before any request."""
+        A feature the contract does not name is refused before any request.
+
+        `peaks_rate` is how many peak values a second to give, `silence_db`
+        the level in dBFS a silence stays under, and `silence_min` how many
+        seconds it lasts; None leaves each to the engine. A value the
+        contract names no parameter for is refused rather than dropped,
+        because it changes the answer.
+        """
         route = self._offered("media_analyze", "analysis")
         asked = self._features(features)
-        params: dict[str, str] = {}
+        params: dict[str, str | int | float] = {}
         if self.contract.features_param:
             names = (getattr(self.contract, f"{name}_feature") for name in asked)
             params[self.contract.features_param] = ",".join(names)
+        for value, field_name, what in (
+            (peaks_rate, "peaks_rate_param", "a choice of peaks rate"),
+            (silence_db, "silence_db_param", "a choice of silence level"),
+            (silence_min, "silence_min_param", "a choice of silence length"),
+        ):
+            if value is None:
+                continue
+            name = getattr(self.contract, field_name)
+            if not name:
+                raise EngineDoesNotOffer(what, self.base_url, field_name)
+            params[name] = value
         each_required = self.contract.features_param is not None
         return self._ask(
             "POST", self._at(route, handle),
@@ -567,9 +648,12 @@ class MediaEngine:
         )
 
     def capabilities(self) -> Capabilities:
-        """What the engine's media surface takes and offers, as it says itself."""
+        """What the engine's media surface takes and offers, as it says itself
+        now. The answer is kept, and an upload is held to its size limit."""
         route = self._offered("media_capabilities", "a statement of its capabilities")
-        return self._ask("GET", route, _read_capabilities, timeout=min(self.timeout, QUICK_TIMEOUT))
+        stated = self._ask("GET", route, _read_capabilities, timeout=min(self.timeout, QUICK_TIMEOUT))
+        self._stated, self._asked_what_it_takes = stated, True
+        return stated
 
     def close(self, handle: MediaHandle | str | None = None) -> bool:
         """Discard `handle`'s upload; with none, discard every upload this
@@ -595,6 +679,21 @@ class MediaEngine:
         if not route:
             raise EngineDoesNotOffer(capability, self.base_url, name)
         return route
+
+    def _upload_limit(self) -> int | None:
+        """The most bytes the engine says an upload may be, asking it once;
+        None when its contract has no capabilities route or it does not say.
+        An engine that answers, but not with a statement of what it takes,
+        is sent the upload, whose own answer then says."""
+        if not self._asked_what_it_takes and self.contract.media_capabilities:
+            try:
+                self.capabilities()
+            except (EngineRefused, EngineAnswerMalformed):
+                self._asked_what_it_takes = True
+        return self._stated.max_bytes if self._stated else None
+
+    def _timeouts(self, read: float) -> httpx.Timeout:
+        return httpx.Timeout(read, connect=min(self.connect_timeout, read))
 
     def _features(self, features: Iterable[str] | None) -> tuple[str, ...]:
         if features is None:
@@ -640,12 +739,17 @@ class MediaEngine:
         """Send one request, and read its answer with `reader`, or raise the
         `EngineError` that says what went wrong and where."""
         request = f"{method} {path}"
-        timeout = self.timeout if timeout is None else timeout
+        timeouts = self._timeouts(self.timeout if timeout is None else timeout)
         try:
             resp = self.client.request(method, self.contract.url(self.base_url, path),
-                                       timeout=timeout, **kwargs)
+                                       timeout=timeouts, **kwargs)
+        except httpx.ConnectTimeout as exc:
+            raise EngineUnavailable(f"not reached within {timeouts.connect:g} seconds",
+                                    self.base_url, request) from exc
         except httpx.TimeoutException as exc:
-            raise EngineUnavailable(f"no answer within {timeout:g} seconds", self.base_url, request) from exc
+            # Reached, and then silent: still working, or stalled.
+            raise EngineUnavailable(f"no answer within {timeouts.read:g} seconds",
+                                    self.base_url, request) from exc
         except httpx.RequestError as exc:
             raise EngineUnavailable(str(exc) or type(exc).__name__, self.base_url, request) from exc
         if not resp.is_success:

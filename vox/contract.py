@@ -157,6 +157,17 @@ class EngineContract:
     in the engine's own names (the `*_feature` fields). None for an engine
     that measures everything it has whenever it is asked."""
 
+    peaks_rate_param: str | None = "peaks_rate"
+    """The parameter naming how many peak values a second an analysis gives.
+    None for an engine whose rate is fixed; asking it for one is refused, as
+    for the two parameters below when the contract names none."""
+
+    silence_db_param: str | None = "silence_db"
+    """The parameter naming the level, in dBFS, a stretch stays under to be a silence."""
+
+    silence_min_param: str | None = "silence_min"
+    """The parameter naming how many seconds a quiet stretch lasts before it is a silence."""
+
     media_id_key: str = "media_id"
     """Where an upload's answer gives the engine's id for it."""
 

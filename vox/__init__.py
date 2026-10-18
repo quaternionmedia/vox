@@ -47,6 +47,7 @@ from vox.media import (
     Segment,
     Silence,
     Transcript,
+    UploadTooLarge,
     Word,
 )
 from vox.session import RoundTrip, SelfReport, VoiceSession
@@ -76,6 +77,7 @@ __all__ = [
     "EngineRefused",
     "EngineAnswerMalformed",
     "EngineDoesNotOffer",
+    "UploadTooLarge",
     "TextToSpeech",
     "RecordingTTS",
     "FormantTTS",

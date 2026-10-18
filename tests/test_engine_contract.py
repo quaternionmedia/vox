@@ -484,3 +484,27 @@ def test_the_media_surface_answers_the_same_over_a_socket_and_in_process(tmp_pat
     assert sent == answered
     assert over_a_socket.requests == in_process.requests
     assert over_a_socket.requests[-1] == "/api/media/m1"
+
+
+@pytest.mark.parametrize(("name", "value", "status"), [
+    ("peaks_rate", "0", 422), ("peaks_rate", "1001", 422), ("peaks_rate", "2.5", 422), ("peaks_rate", "x", 422),
+    ("peaks_rate", "1", 200), ("peaks_rate", "1000", 200),
+    ("silence_db", "-121", 422), ("silence_db", "0.5", 422), ("silence_db", "-120", 200), ("silence_db", "0", 200),
+    ("silence_min", "0", 422), ("silence_min", "3601", 422), ("silence_min", "3600", 200),
+    ("silence_min", "0.01", 200),
+])
+def test_a_media_analysis_holds_its_tuning_to_joe_s_bounds(media_engine, name, value, status):
+    """joe's analyze route takes `peaks_rate` as an integer `ge=1, le=1000`,
+    `silence_db` as `ge=-120, le=0` and `silence_min` as `gt=0, le=3600`, and
+    its framework refuses anything else 422 before the route runs. The edges
+    are pinned too: a stand-in with an exclusive bound passes every refusal.
+
+    Seen to fail with the bounds unchecked: every refusal was answered 200."""
+    client, _ = media_engine
+    _upload(client, _wav(1.0))
+
+    resp = client.post("/api/media/m1/analyze", params={"features": "peaks", name: value})
+
+    assert resp.status_code == status
+    if status == 422:
+        assert resp.json()["detail"].startswith(f"{name} must be ")

@@ -187,17 +187,30 @@ with MediaEngine(EngineContract(), "http://127.0.0.1:8010") as engine:
   upload is kept.
 - **A feature is asked for by vox's name**, the `Analysis` field, and the
   contract names the engine's: `vox.adapters.joe` asks for `silence` and
-  reads the answer under `silences`.
+  reads the answer under `silences`. `analyze(..., peaks_rate=,
+  silence_db=, silence_min=)` tunes the waveform's values a second and what
+  counts as a silence; each left None keeps the engine's own.
 - **What the contract leaves None is refused by name, before any request**,
-  with `EngineDoesNotOffer`. A language asked of an engine that cannot be
-  told one is refused rather than dropped: the transcript would be in a
-  language nobody asked for. `words` travels only under the contract's own
+  with `EngineDoesNotOffer`. A language, or a tuning, asked of an engine
+  that cannot be told one is refused rather than dropped: the answer would
+  be one nobody asked for. `words` travels only under the contract's own
   spelling, and a contract without one gets the words its engine gives.
+- **An upload is held to the size the engine says it takes**, asked once
+  per engine, and a larger one is refused with `UploadTooLarge` and not
+  sent. An engine refusing a size it reads from the declared length answers
+  before reading the body and closes the connection, and a client still
+  sending can see the connection reset before the refusal reaches it, which
+  would read as an engine not answering.
 - **Every failure names the engine's URL.** `EngineUnavailable` when nothing
   answered in time; `EngineRefused`, with the engine's `status` and its
   `detail`, when it refused; `EngineAnswerMalformed`, saying where, when the
   answer is not the shape the contract describes. Each is an `EngineError`,
   rebuilt whole from its arguments, so a task queue can carry one.
+- **Reaching the engine and its answer are timed apart.** `timeout`, thirty
+  minutes unless given, is how long an answer may take, because an engine
+  says nothing until it has transcribed the whole upload; `connect_timeout`,
+  ten seconds, is how long reaching it may, so an engine that is not there
+  is known at once.
 - **Leaving the block discards every upload the engine still holds**, and
   `close(upload)` discards one. Neither raises: an upload the engine cannot
   be told to drop expires on its own clock.
@@ -238,8 +251,9 @@ fails the offline suite rather than a live run:
   a body it cannot decode, which is anything but a WAV. A transcribe answers
   `EngineState.transcript` and an analyze `EngineState.analysis`, so nothing
   about what an upload says is measured. An unknown upload is 404 on every
-  route and an unknown feature 422, a delete is 204 with no body, and no id
-  is handed out twice. `media_transport(state)` answers the same surface
+  route and an unknown feature 422, as is an analysis tuned outside the
+  stood-in engine's bounds; a delete is 204 with no body, and no id is
+  handed out twice. `media_transport(state)` answers the same surface
   in-process, as an `httpx.MockTransport`, for a client built around it.
   `tests/test_engine_contract.py` names the joe commit each answer was read at.
 
