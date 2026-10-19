@@ -415,6 +415,32 @@ def test_a_refusal_s_reason_is_read_in_this_contract_s_spelling(media):
     assert refused.value.detail.startswith("unsupported media type 'text/plain'")
 
 
+def test_the_stand_in_refuses_a_request_by_this_contract_s_names_for_it(media):
+    """A tuning out of bounds is refused naming the parameter as the contract
+    spells it, as an engine names its own, and a language the engine does
+    not know is refused on either contract alike.
+
+    Seen to fail by reading the tuning under the default's names: on the
+    alien contract the engine never read `outline_hz=0`, and answered the
+    analysis rather than refusing it."""
+    engine, _, contract = media
+    upload = engine.upload(_wav(0.5), "audio/wav")
+
+    refusals = []
+    for ask in (lambda: engine.analyze(upload, ["peaks"], peaks_rate=0),
+                lambda: engine.analyze(upload, ["silences"], silence_db=1.0),
+                lambda: engine.transcribe(upload, language="klingon")):
+        with pytest.raises(EngineRefused) as refused:
+            ask()
+        refusals.append((refused.value.status, refused.value.detail))
+
+    assert refusals == [
+        (422, f"{contract.peaks_rate_param}: Input should be greater than or equal to 1"),
+        (422, f"{contract.silence_db_param}: Input should be less than or equal to 0"),
+        (422, "unknown language 'klingon'; give a code such as 'en' or a name such as 'English'"),
+    ]
+
+
 def test_a_feature_the_contract_does_not_name_is_refused_on_either_contract(media):
     """Refused by vox's name for it, before any request: on the alien
     contract too, where the engine's own name for beats is `pulse`."""

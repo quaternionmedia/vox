@@ -553,6 +553,14 @@ MUTATIONS = [
         why="An unknown upload asked for with a bad tuning or feature would be a 404 offline and a 422 live.",
     ),
     Mutation(
+        name="the stand-in reads a tuning under the default's names",
+        path="vox/engine.py",
+        find="        name = getattr(contract, field_name)",
+        replace='        name = field_name.removesuffix("_param")',
+        catches="tests/test_contract.py::test_the_stand_in_refuses_a_request_by_this_contract_s_names_for_it",
+        why="An engine spelling its tuning otherwise would never be refused a value its real counterpart refuses, and a test on it would pass for not reading the value at all.",
+    ),
+    Mutation(
         name="the stand-in reads an integer without its zeros",
         path="vox/engine.py",
         find=r'_INTEGER = re.compile(r"[+-]?[0-9]+(?:_[0-9]+)*(?:\.0+)?")',
