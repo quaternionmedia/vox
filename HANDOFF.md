@@ -12,8 +12,10 @@ is the part that is not visible from inside this clone.
 true at those commits and nowhere else, with two exceptions. The live media
 figures -- the first transcript, the analysis, the oversized upload -- were
 measured against joe at `4ec1424` while vox was at `dc7da78`, and nothing
-under `vox/` has changed since. The workstation's audio inputs were counted
-at the 2026-10-12 stamp and not again.
+under `vox/` that reaches joe has changed since:
+`fix/offline-engine-matches-joe` changes the stand-in, `vox/engine.py`,
+alone. The workstation's audio inputs were counted at the 2026-10-12 stamp
+and not again.
 
 ## The shape
 
@@ -63,7 +65,10 @@ audio or video --> the same engine's media surface --> a transcript, timed,
   which alfred locks itself. At this stamp the submodule is pinned at
   `aa17dbd`, the commit this restamp is made on, which has `vox.media`.
   Nothing under `vox/` changes on this branch, so moving the pin to its tip
-  changes no code alfred runs.
+  changes no code alfred runs. `fix/offline-engine-matches-joe`, after it,
+  changes the stand-in, `vox/engine.py`, alone: `import vox` loads it,
+  alfred's code calls none of it, and alfred's tests drive it through
+  `media_transport`.
 
 Importing `vox` loads no adapter, and a test asserts it in a fresh
 interpreter. Products are named in `vox.adapters`; the CLI imports that
@@ -174,9 +179,10 @@ The media walkthrough proves the client against a stand-in answering a
 script: the contract's spelling, the upload's real length, the answers read
 back, the upload discarded. What an upload says and how its sound measures
 is joe's, and the live check above is where that was seen. The stand-in
-refuses some of what joe refuses, and some of what joe takes; README's
-*Against joe's media API* says which, so an offline pass is not read as a
-live one.
+judges a request as joe does, in joe's order and with joe's statuses, but
+decodes nothing, so what an upload holds beyond a WAV's header is the
+script's; README's *Against joe's media API* says where the two differ,
+so an offline pass is not read as a live one.
 
 ## Where the rest is written down
 
