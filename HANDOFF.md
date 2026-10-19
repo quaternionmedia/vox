@@ -12,9 +12,9 @@ is the part that is not visible from inside this clone.
 true at those commits and nowhere else, with two exceptions. The live media
 figures -- the first transcript, the analysis, the oversized upload -- were
 measured against joe at `4ec1424` while vox was at `dc7da78`, and nothing
-under `vox/` that reaches joe has changed since:
-`fix/offline-engine-matches-joe` changes the stand-in, `vox/engine.py`,
-alone. The workstation's audio inputs were counted at the 2026-10-12 stamp
+under `vox/` that reaches joe's media surface has changed since:
+`fix/offline-engine-matches-joe` changes the stand-in, `vox/engine.py`, and
+how `HttpSTT.devices` and `vox doctor` read a refused microphone. The workstation's audio inputs were counted at the 2026-10-12 stamp
 and not again.
 
 ## The shape
@@ -66,9 +66,11 @@ audio or video --> the same engine's media surface --> a transcript, timed,
   `aa17dbd`, the commit this restamp is made on, which has `vox.media`.
   Nothing under `vox/` changes on this branch, so moving the pin to its tip
   changes no code alfred runs. `fix/offline-engine-matches-joe`, after it,
-  changes the stand-in, `vox/engine.py`, alone: `import vox` loads it,
-  alfred's code calls none of it, and alfred's tests drive it through
-  `media_transport`.
+  changes the stand-in, `vox/engine.py`, and `HttpSTT.devices`, in
+  `vox/stt.py`: `import vox` loads both, alfred's code calls neither, and
+  alfred's tests drive the stand-in through `media_transport`. Under `vox/`
+  it also changes `vox doctor`, which `import vox` does not load, and a
+  docstring in `vox/contract.py`.
 
 Importing `vox` loads no adapter, and a test asserts it in a fresh
 interpreter. Products are named in `vox.adapters`; the CLI imports that
