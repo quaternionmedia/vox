@@ -19,21 +19,24 @@ a real engine as a separate claim.
 **A script, not a hearing.** On the contract's media surface it takes an
 upload, reads a WAV's length from its header, and answers the transcript and
 the analysis it was handed in `EngineState`, so `vox.media.MediaEngine` runs
-unmodified against it and nothing about what an upload says is measured.
-`media_transport` answers that surface in-process, with no socket.
+unmodified against it and nothing about what an upload says is measured. It
+judges a request in the order the engine it stands in for judges one, and
+refuses with that engine's status and sentence. `media_transport` answers
+that surface in-process, with no socket.
 """
 
 from __future__ import annotations
 
 import functools
-import io
 import itertools
 import json
+import operator
 import os
 import re
+import struct
 import threading
 import wave
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -55,13 +58,53 @@ MEDIA_FORMATS = (
     "video/mp4", "video/quicktime", "video/webm", "video/x-matroska", "video/matroska",
 )
 """The content types the media upload takes: those the engine it stands in
-for takes, each format under the names browsers and platforms give it.
-Whatever the declared type, only a WAV body is decoded, as an engine decodes
-by content; anything else is answered 422."""
+for takes, each format under the names browsers and platforms give it. Any
+other is answered 415. Whatever the type declared, a body is read for what
+it is, as a decoder reads one: a WAV from its own header, a body beginning
+as one of the other formats as `EngineState.sound` says, and anything else
+is answered 422."""
 
 MEDIA_LIMIT = 1024**3
 """The most bytes the media upload takes, the default cap of the engine it
 stands in for. A larger upload is answered 413."""
+
+MEDIA_SECONDS = 7200.0
+"""The longest sound the media upload takes, in seconds: two hours, the
+default of the engine it stands in for. A longer one is answered 413."""
+
+LANGUAGES = {
+    "en": "english", "zh": "chinese", "de": "german", "es": "spanish", "ru": "russian", "ko": "korean",
+    "fr": "french", "ja": "japanese", "pt": "portuguese", "tr": "turkish", "pl": "polish", "ca": "catalan",
+    "nl": "dutch", "ar": "arabic", "sv": "swedish", "it": "italian", "id": "indonesian", "hi": "hindi",
+    "fi": "finnish", "vi": "vietnamese", "he": "hebrew", "uk": "ukrainian", "el": "greek", "ms": "malay",
+    "cs": "czech", "ro": "romanian", "da": "danish", "hu": "hungarian", "ta": "tamil", "no": "norwegian",
+    "th": "thai", "ur": "urdu", "hr": "croatian", "bg": "bulgarian", "lt": "lithuanian", "la": "latin",
+    "mi": "maori", "ml": "malayalam", "cy": "welsh", "sk": "slovak", "te": "telugu", "fa": "persian",
+    "lv": "latvian", "bn": "bengali", "sr": "serbian", "az": "azerbaijani", "sl": "slovenian",
+    "kn": "kannada", "et": "estonian", "mk": "macedonian", "br": "breton", "eu": "basque",
+    "is": "icelandic", "hy": "armenian", "ne": "nepali", "mn": "mongolian", "bs": "bosnian",
+    "kk": "kazakh", "sq": "albanian", "sw": "swahili", "gl": "galician", "mr": "marathi", "pa": "punjabi",
+    "si": "sinhala", "km": "khmer", "sn": "shona", "yo": "yoruba", "so": "somali", "af": "afrikaans",
+    "oc": "occitan", "ka": "georgian", "be": "belarusian", "tg": "tajik", "sd": "sindhi", "gu": "gujarati",
+    "am": "amharic", "yi": "yiddish", "lo": "lao", "uz": "uzbek", "fo": "faroese", "ht": "haitian creole",
+    "ps": "pashto", "tk": "turkmen", "nn": "nynorsk", "mt": "maltese", "sa": "sanskrit",
+    "lb": "luxembourgish", "my": "myanmar", "bo": "tibetan", "tl": "tagalog", "mg": "malagasy",
+    "as": "assamese", "tt": "tatar", "haw": "hawaiian", "ln": "lingala", "ha": "hausa", "ba": "bashkir",
+    "jw": "javanese", "su": "sundanese", "yue": "cantonese",
+}
+"""The languages a transcript can be asked for in, by code, each with its
+name: those the stood-in engine's speech model knows, copied from its
+tokenizer at the version that engine locks (`tests/test_engine_contract.py`
+names it). A language is asked for by its code or a name, in any case, and
+the transcript answers in the code; any other is answered 422."""
+
+_LANGUAGE_NAMES = {
+    **{name: code for code, name in LANGUAGES.items()},
+    "burmese": "my", "valencian": "ca", "flemish": "nl", "haitian": "ht", "letzeburgesch": "lb",
+    "pushto": "ps", "panjabi": "pa", "moldavian": "ro", "moldovan": "ro", "sinhalese": "si",
+    "castilian": "es", "mandarin": "zh",
+}
+"""Every name the speech model knows a language by, with its code."""
 
 MAGIC = b"VOX1"
 """Marks a WAV as written by `encode_wav`.
@@ -179,7 +222,7 @@ class EngineState:
     """What the media surface's transcribe answers, for any upload: the test's
     script for what was said in it. None answers an empty transcript. Asked
     for no words, it answers the segments without theirs; asked for a
-    language, it answers that one."""
+    language, it answers in that language's code."""
 
     analysis: Analysis | None = None
     """What the media surface's analyze answers for each feature asked for,
@@ -192,6 +235,23 @@ class EngineState:
 
     media_limit: int = MEDIA_LIMIT
     """The most bytes an upload may be. A larger one is answered 413."""
+
+    media_seconds: float | None = MEDIA_SECONDS
+    """The longest sound an upload may hold, in seconds. A longer one is
+    answered 413; None takes a sound of any length."""
+
+    decoder: bool = True
+    """Whether the engine has the decoder its uploads are read with. False
+    answers every upload 503 once its type and declared size are judged,
+    and the capabilities list no formats, as an engine without one does."""
+
+    sound: tuple[float, int, int] | None = None
+    """What an upload holds when it is in a format the stand-in cannot read
+    -- any but a WAV of plain samples -- as `(seconds, sample_rate,
+    channels)`: the test's script for its sound, as `transcript` is for what
+    is said in it. None answers such an upload 422. A body that begins as
+    none of the formats taken is answered 422 whatever this says, and a WAV
+    of plain samples is read from its own header."""
 
     uploads: dict[str, MediaHandle] = field(default_factory=dict)
     """What the engine holds, by id: added by an upload, removed by a delete."""
@@ -221,20 +281,36 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _media(self, method: str) -> bool:
         """Answer the request when it is on the contract's media surface.
-        Returns whether it was; the body is read only when it was."""
+        Returns whether it was; the body is read only when it was, and only
+        once the answer needs it."""
         route = urlparse(self.path)
         found = _media_route(self.state.contract, method, route.path)
         if found is None:
             return False
-        length = int(self.headers.get("Content-Length") or 0)
-        status, body = _answer_media(self.state, found, parse_qs(route.query),
-                                     self.headers.get("Content-Type") or "", self.rfile.read(length))
+        declared = self.headers.get("Content-Length") or ""
+        unread = int(declared) if declared.isdigit() else 0
+
+        def read() -> bytes:
+            nonlocal unread
+            body, unread = self.rfile.read(unread), 0
+            return body
+
+        status, body = _answer_media(self.state, found, _query(route.query),
+                                     self.headers.get("Content-Type"), declared, read)
         if body is None:
             # An answer with nothing to say, as a delete's 204 is: no body at all.
             self.send_response(status)
             self.end_headers()
         else:
             self._send(status, body)
+        # What the answer did not read is read and dropped before the
+        # connection closes: one closed on a client still sending can reach
+        # it as a reset before the answer does, which no test can rely on.
+        while unread > 0:
+            dropped = self.rfile.read(min(unread, 1 << 16))
+            if not dropped:
+                break
+            unread -= len(dropped)
         return True
 
     def do_GET(self):  # noqa: N802 — BaseHTTPRequestHandler's spelling
@@ -351,6 +427,11 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 # ── The media surface ────────────────────────────────────────────────────────
+#
+# Judged in the order the stood-in engine judges a request, and refused with
+# its status and its sentence, so a caller that reads either reads the same
+# here. Where its sentence names that engine or one of its settings, this one
+# names `vox.engine` or the `EngineState` field in their place.
 
 _MEDIA_ROUTES = (
     ("upload", "POST", "media_upload"),
@@ -360,9 +441,59 @@ _MEDIA_ROUTES = (
     ("delete", "DELETE", "media_delete"),
 )
 
-_FLAGS = {"true": True, "1": True, "yes": True, "on": True,
-          "false": False, "0": False, "no": False, "off": False}
-"""What the stood-in engine's framework reads as a boolean parameter."""
+_BOOLEANS = {"1": True, "on": True, "t": True, "true": True, "y": True, "yes": True,
+             "0": False, "off": False, "f": False, "false": False, "n": False, "no": False}
+"""What the stood-in engine's framework reads as a boolean parameter, in any
+case and with nothing either side."""
+
+_INTEGER = re.compile(r"[+-]?[0-9]+(?:_[0-9]+)*(?:\.0+)?")
+"""What its framework reads as an integer once the spaces either side are
+stripped: ASCII digits, an underscore between two of them, and a point
+followed by zeros alone, so `5.0` is 5 and `2.5` is no integer."""
+
+_INTEGER_UNREAD = "Input should be a valid integer, unable to parse string as an integer"
+_NUMBER_UNREAD = "Input should be a valid number, unable to parse string as a number"
+
+_TUNING = (
+    ("peaks_rate_param", "integer", _INTEGER_UNREAD, (("le", 1000), ("ge", 1))),
+    ("silence_db_param", "number", _NUMBER_UNREAD, (("le", 0.0), ("ge", -120.0))),
+    ("silence_min_param", "number", _NUMBER_UNREAD, (("le", 3600.0), ("gt", 0.0))),
+)
+"""What an analysis can be tuned by, in the order its route takes them: each
+value's kind, why one that does not read as that kind is refused, and its
+bounds in the order its framework checks them, so a value outside both, as
+`nan` is, is refused for the first."""
+
+_BOUNDS = {
+    "le": (operator.le, "less than or equal to"),
+    "ge": (operator.ge, "greater than or equal to"),
+    "gt": (operator.gt, "greater than"),
+}
+
+_NOT_HELD = "no such media: it was never uploaded here, has expired, or was deleted"
+
+_UNDECODABLE = ("this media has no audio ffmpeg can decode: "
+                "Error opening input files: Invalid data found when processing input")
+"""The stood-in engine's refusal of a body its decoder cannot open, with the
+decoder's own last word on it."""
+
+_WAV_COUNTED = {0x0001, 0x0003, 0x0006, 0x0007}
+"""The WAV sample formats a frame of which is the header's block of bytes --
+integer, float, A-law and mu-law samples -- so the data's length counts the
+frames. Any other is compressed, and its length is a decoder's to read."""
+
+_ATOMS = (b"ftyp", b"moov", b"mdat", b"free", b"skip", b"wide")
+"""The atoms an MP4, M4A or QuickTime file can begin with, after its size."""
+
+
+class _Refused(Exception):
+    """A request on the media surface refused: its status, and the sentence
+    that says why."""
+
+    def __init__(self, status: int, detail: str):
+        super().__init__(detail)
+        self.status = status
+        self.detail = detail
 
 
 @functools.lru_cache(maxsize=64)
@@ -388,67 +519,146 @@ def _media_route(contract: EngineContract, method: str, path: str) -> tuple[str,
     return None
 
 
-def _probe_wav(body: bytes) -> tuple[int, int, int] | None:
-    """A WAV body's frames, rate and channels; None for anything else."""
-    try:
-        with wave.open(io.BytesIO(body), "rb") as wav:
-            frames, rate, channels = wav.getnframes(), wav.getframerate(), wav.getnchannels()
-    except (wave.Error, EOFError):
+def _query(raw: str) -> dict[str, list[str]]:
+    """A query string's parameters, a blank value kept as one: the stood-in
+    engine's framework refuses `words=` rather than reading it as absent."""
+    return parse_qs(raw, keep_blank_values=True)
+
+
+def _last(query: dict[str, list[str]], name: str | None) -> str | None:
+    """What `query` gives the parameter `name`: the last value when it gives
+    several, as the stood-in engine's framework reads one, and None when it
+    gives none or the contract names no such parameter."""
+    values = query.get(name) if name else None
+    return values[-1] if values else None
+
+
+def _parsed(text: str, kind: str) -> int | float | None:
+    """`text` as the stood-in engine's framework reads an integer or a
+    number; None when it does not read as one."""
+    text = text.strip()
+    if kind == "integer":
+        return int(text.partition(".")[0]) if _INTEGER.fullmatch(text) else None
+    if not text.isascii():
         return None
-    return (frames, rate, channels) if rate > 0 else None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _tuning_refused(contract: EngineContract, query: dict[str, list[str]]) -> str | None:
+    """Why an analysis's tuning is refused, as the stood-in engine's framework
+    refuses it, before the route runs and so before the upload's id is looked
+    up: each value that does not parse or falls outside its bounds, as `name:
+    reason`, in the order the route takes them, joined by `; `. None when no
+    value is refused."""
+    refused = []
+    for field_name, kind, unread, bounds in _TUNING:
+        name = getattr(contract, field_name)
+        text = _last(query, name)
+        if text is None:
+            continue
+        value = _parsed(text, kind)
+        if value is None:
+            refused.append(f"{name}: {unread}")
+            continue
+        for check, bound in bounds:
+            within, words = _BOUNDS[check]
+            if not within(value, bound):
+                refused.append(f"{name}: Input should be {words} {bound:g}")
+                break
+    return "; ".join(refused) or None
+
+
+def _language_code(language: str | None) -> str | None:
+    """The code of the language a transcript is asked for in, by its code or
+    a name; None when none is asked, which leaves it to the engine. Refused
+    422 for one the speech model does not know."""
+    if language is None or not language.strip():
+        return None
+    key = language.strip().lower()
+    code = key if key in LANGUAGES else _LANGUAGE_NAMES.get(key)
+    if code is None:
+        raise _Refused(422, f"unknown language {language!r}; give a code such as 'en' or a name such as "
+                            "'English'")
+    return code
+
+
+def _use(state: EngineState, media_id: str) -> MediaHandle:
+    """The upload `media_id` names. Refused 404 when the engine does not hold
+    it: it keeps an upload until it is deleted."""
+    upload = state.uploads.get(media_id)
+    if upload is None:
+        raise _Refused(404, _NOT_HELD)
+    return upload
 
 
 def _answer_media(state: EngineState, route: tuple[str, str | None], query: dict[str, list[str]],
-                  content_type: str, body: bytes) -> tuple[int, dict | None]:
+                  content_type: str | None, declared: str,
+                  read: Callable[[], bytes]) -> tuple[int, dict | None]:
     """Answer one request on the media surface, under the contract's keys. A
-    body of None is an answer with none, as a delete's is."""
+    body of None is an answer with none, as a delete's is.
+
+    `declared` is the request's Content-Length as sent, and `read` reads its
+    body, which an upload alone asks for, once its headers have been judged."""
     name, media_id = route
-    contract = state.contract
-    if name == "upload":
-        return _media_upload(state, content_type, body)
-    if name == "capabilities":
-        return 200, {
-            contract.formats_key: list(state.media_formats),
-            contract.features_key: [
-                getattr(contract, f"{n}_feature") for n in FEATURES if getattr(contract, f"{n}_feature")
-            ],
-            # It has no speech model; the transcript it answers is the script.
-            contract.speech_model_key: None,
-            contract.word_timestamps_key: True,
-            contract.max_bytes_key: state.media_limit,
-            # It takes a sound of any length, and keeps an upload until it is deleted.
-            contract.max_seconds_key: None,
-            contract.ttl_seconds_key: None,
-        }
-    upload = state.uploads.get(media_id)
-    if upload is None:
-        # An unknown id and an expired one are the same answer.
-        return 404, {contract.detail_key: f"No such media: {media_id}"}
-    if name == "transcribe":
-        return _media_transcribe(state, query)
-    if name == "analyze":
-        return _media_analyze(state, upload, query)
-    del state.uploads[media_id]
-    return 204, None
+    try:
+        if name == "upload":
+            return 201, _media_upload(state, content_type, declared, read)
+        if name == "capabilities":
+            return 200, _media_capabilities(state)
+        if name == "transcribe":
+            return 200, _media_transcribe(state, media_id, query)
+        if name == "analyze":
+            return 200, _media_analyze(state, media_id, query)
+        _media_delete(state, media_id)
+        return 204, None
+    except _Refused as refusal:
+        return refusal.status, {state.contract.detail_key: refusal.detail}
 
 
-def _media_upload(state: EngineState, content_type: str, body: bytes) -> tuple[int, dict]:
+def _media_capabilities(state: EngineState) -> dict:
     contract = state.contract
-    if len(body) > state.media_limit:
-        return 413, {contract.detail_key: f"Upload too large (max {state.media_limit} bytes)"}
-    kind = content_type.split(";")[0].strip().lower()
+    return {
+        # Listed in order, as the stood-in engine lists them, and none at all
+        # when there is no decoder to read one with.
+        contract.formats_key: sorted(state.media_formats) if state.decoder else [],
+        contract.features_key: [
+            getattr(contract, f"{n}_feature") for n in FEATURES if getattr(contract, f"{n}_feature")
+        ],
+        # It has no speech model; the transcript it answers is the script.
+        contract.speech_model_key: None,
+        contract.word_timestamps_key: True,
+        contract.max_bytes_key: state.media_limit,
+        contract.max_seconds_key: state.media_seconds,
+        # It keeps an upload until it is deleted.
+        contract.ttl_seconds_key: None,
+    }
+
+
+def _media_upload(state: EngineState, content_type: str | None, declared: str,
+                  read: Callable[[], bytes]) -> dict:
+    """Take an upload, judged as the stood-in engine judges one: its type, its
+    declared size before a byte of it is read, whether there is a decoder,
+    the size it turns out to be, and then what it holds."""
+    contract = state.contract
+    kind = (content_type or "").split(";")[0].strip().lower()
     if kind not in state.media_formats:
-        allowed = ", ".join(state.media_formats)
-        return 415, {contract.detail_key: f"Unsupported media type {kind!r}. Allowed: {allowed}"}
-    probed = _probe_wav(body)
-    if probed is None:
-        return 422, {contract.detail_key: "No decodable audio in the upload (vox.engine decodes WAV only)"}
-    frames, rate, channels = probed
-    if frames == 0:
-        return 422, {contract.detail_key: "No audio in the upload"}
-    handle = MediaHandle(f"m{next(state._ids)}", frames / rate, rate, channels, True)
+        raise _Refused(415, f"unsupported media type '{kind or 'none'}'; vox.engine takes "
+                            f"{', '.join(sorted(state.media_formats))}")
+    too_large = f"media larger than {state.media_limit} bytes (EngineState.media_limit)"
+    if declared.isdigit() and int(declared) > state.media_limit:
+        raise _Refused(413, too_large)
+    if not state.decoder:
+        raise _Refused(503, "ffmpeg was not found: EngineState.decoder is False")
+    body = read()
+    if len(body) > state.media_limit:
+        raise _Refused(413, too_large)
+    seconds, rate, channels = _sound(state, body)
+    handle = MediaHandle(f"m{next(state._ids)}", round(seconds, 3), rate, channels, True)
     state.uploads[handle.media_id] = handle
-    return 201, {
+    return {
         contract.media_id_key: handle.media_id,
         contract.duration_key: handle.duration,
         contract.sample_rate_key: handle.sample_rate,
@@ -457,14 +667,90 @@ def _media_upload(state: EngineState, content_type: str, body: bytes) -> tuple[i
     }
 
 
-def _media_transcribe(state: EngineState, query: dict[str, list[str]]) -> tuple[int, dict]:
+def _sound(state: EngineState, body: bytes) -> tuple[float, int, int]:
+    """What an upload's body holds, as `(seconds, sample_rate, channels)`.
+    Refused 422 for a body with no sound the stand-in can read or none in it,
+    and 413 for a sound longer than it takes."""
+    if body[:4] in (b"RIFF", b"RF64", b"BW64") and body[8:12] == b"WAVE":
+        header = _wav_header(body)
+        if header is None:
+            raise _Refused(422, _UNDECODABLE)
+        sample_format, channels, rate, frame_bytes, data_bytes = header
+        if sample_format in _WAV_COUNTED:
+            sound = ((data_bytes // frame_bytes) / rate, rate, channels)
+        else:
+            sound = _scripted(state)
+    elif _begins_as_media(body):
+        sound = _scripted(state)
+    else:
+        raise _Refused(422, _UNDECODABLE)
+    seconds = sound[0]
+    if seconds <= 0:
+        raise _Refused(422, "this media's audio stream holds no samples")
+    if state.media_seconds is not None and seconds > state.media_seconds:
+        raise _Refused(413, f"this media's sound is longer than {state.media_seconds:g} seconds "
+                            f"(EngineState.media_seconds)")
+    return sound
+
+
+def _scripted(state: EngineState) -> tuple[float, int, int]:
+    """What the script says a body the stand-in cannot read holds."""
+    if state.sound is None:
+        raise _Refused(422, "vox.engine cannot read this media's sound, and EngineState.sound does not say "
+                            "what it holds")
+    return state.sound
+
+
+def _wav_header(body: bytes) -> tuple[int, int, int, int, int] | None:
+    """A WAV's sample format, channels, rate, bytes a frame and bytes of
+    sound, read chunk by chunk as a decoder reads them: the format before the
+    data, and the data no longer than what arrived. None when the header does
+    not say."""
+    found = None
+    at = 12
+    while at + 8 <= len(body):
+        chunk, size, start = body[at:at + 4], int.from_bytes(body[at + 4:at + 8], "little"), at + 8
+        if chunk == b"fmt " and size >= 16 and start + 16 <= len(body):
+            sample_format, channels, rate, _, frame_bytes = struct.unpack_from("<HHIIH", body, start)
+            if sample_format == 0xFFFE and size >= 26 and start + 26 <= len(body):
+                # WAVE_FORMAT_EXTENSIBLE: the format is the subformat's first two bytes.
+                sample_format = int.from_bytes(body[start + 24:start + 26], "little")
+            found = (sample_format, channels, rate, frame_bytes)
+        elif chunk == b"data":
+            if found is None or not all(found[1:]):
+                return None
+            arrived = len(body) - start
+            # 0xFFFFFFFF is a length left for a later chunk to say, as a long
+            # WAV's is, or one written as it was recorded.
+            return (*found, arrived if size == 0xFFFFFFFF else min(size, arrived))
+        at = start + size + (size & 1)
+    return None
+
+
+def _begins_as_media(body: bytes) -> bool:
+    """Whether `body` begins as one of the other formats the media upload
+    takes begins: an Ogg page, a FLAC stream, an ID3 tag, a Matroska or WebM
+    header, an MP4 or QuickTime atom, or an MPEG audio or ADTS frame. Whether
+    the rest of it is sound is a decoder's question, and the stand-in has
+    none to ask."""
+    if body.startswith((b"OggS", b"fLaC", b"ID3", b"\x1a\x45\xdf\xa3")) or body[4:8] in _ATOMS:
+        return True
+    return len(body) > 1 and body[0] == 0xFF and body[1] & 0xE0 == 0xE0
+
+
+def _media_transcribe(state: EngineState, media_id: str, query: dict[str, list[str]]) -> dict:
+    """A transcript, judged as the stood-in engine judges one: `words` before
+    the id is looked up, and the language after."""
     contract = state.contract
     words = True
-    if contract.words_param and contract.words_param in query:
-        words = _FLAGS.get(query[contract.words_param][0].lower())
+    flag = _last(query, contract.words_param)
+    if flag is not None:
+        words = _BOOLEANS.get(flag.lower())
         if words is None:
-            return 422, {contract.detail_key: f"{contract.words_param} must be true or false"}
-    language = query.get(contract.language_param, [None])[0] if contract.language_param else None
+            raise _Refused(422, f"{contract.words_param}: Input should be a valid boolean, "
+                                "unable to interpret input")
+    _use(state, media_id)
+    language = _language_code(_last(query, contract.language_param))
     script = state.transcript or Transcript(text="", language=None, segments=())
     segments = []
     for segment in script.segments:
@@ -480,7 +766,7 @@ def _media_transcribe(state: EngineState, query: dict[str, list[str]]) -> tuple[
                 for w in segment.words
             ] if words else [],
         })
-    return 200, {
+    return {
         contract.text_key: script.text,
         contract.language_key: language or script.language,
         contract.segments_key: segments,
@@ -488,44 +774,35 @@ def _media_transcribe(state: EngineState, query: dict[str, list[str]]) -> tuple[
     }
 
 
-def _tuning_refused(contract: EngineContract, query: dict[str, list[str]]) -> str | None:
-    """Why an analysis's tuning is refused, as the stood-in engine's framework
-    refuses it before the route runs; None when it is not."""
-    bounds = (
-        (contract.peaks_rate_param, int, lambda v: 1 <= v <= 1000, "an integer from 1 to 1000"),
-        (contract.silence_db_param, float, lambda v: -120.0 <= v <= 0.0, "a level from -120 to 0"),
-        (contract.silence_min_param, float, lambda v: 0.0 < v <= 3600.0, "more than 0 and at most 3600"),
-    )
-    for name, parse, within, what in bounds:
-        if not name or name not in query:
-            continue
-        try:
-            value = parse(query[name][0])
-        except ValueError:
-            return f"{name} must be {what}"
-        if not within(value):
-            return f"{name} must be {what}"
-    return None
-
-
-def _media_analyze(state: EngineState, upload: MediaHandle, query: dict[str, list[str]]) -> tuple[int, dict]:
+def _media_analyze(state: EngineState, media_id: str, query: dict[str, list[str]]) -> dict:
+    """An analysis, judged as the stood-in engine judges one: its tuning, then
+    the features asked for, and only then the upload's id."""
     contract = state.contract
     refused = _tuning_refused(contract, query)
     if refused:
-        return 422, {contract.detail_key: refused}
+        raise _Refused(422, refused)
     offered = {getattr(contract, f"{n}_feature"): n for n in FEATURES if getattr(contract, f"{n}_feature")}
-    named = query.get(contract.features_param, [""])[0] if contract.features_param else ""
+    named = _last(query, contract.features_param) or ""
     names = [n.strip().lower() for n in named.split(",") if n.strip()]
     unknown = [n for n in names if n not in offered]
     if unknown:
-        return 422, {contract.detail_key: f"unknown feature '{unknown[0]}'; it measures {', '.join(offered)}"}
+        raise _Refused(422, f"unknown feature '{unknown[0]}'; vox.engine measures {', '.join(offered)}")
+    upload = _use(state, media_id)
     # None named measures every one, as the stood-in engine does.
-    asked = [offered[n] for n in names] if names else list(offered.values())
+    asked = {offered[n] for n in names} if names else set(offered.values())
     script = state.analysis or Analysis()
     body: dict = {contract.duration_key: upload.duration}
-    for name in asked:
-        body[getattr(contract, f"{name}_key")] = _shown_feature(name, getattr(script, name), contract)
-    return 200, body
+    # The duration first, then each feature asked for in the order the engine
+    # gives them, whatever the order asked.
+    for name in FEATURES:
+        if name in asked:
+            body[getattr(contract, f"{name}_key")] = _shown_feature(name, getattr(script, name), contract)
+    return body
+
+
+def _media_delete(state: EngineState, media_id: str) -> None:
+    if state.uploads.pop(media_id, None) is None:
+        raise _Refused(404, _NOT_HELD)
 
 
 def _shown_feature(name: str, value, contract: EngineContract):
@@ -563,8 +840,8 @@ def media_transport(state: EngineState) -> httpx.MockTransport:
         found = _media_route(state.contract, request.method, route.path)
         if found is None:
             return httpx.Response(404, json={"detail": "Not Found"})
-        status, body = _answer_media(state, found, parse_qs(route.query),
-                                     request.headers.get("Content-Type", ""), request.content)
+        status, body = _answer_media(state, found, _query(route.query), request.headers.get("Content-Type"),
+                                     request.headers.get("Content-Length", ""), lambda: request.content)
         return httpx.Response(status) if body is None else httpx.Response(status, json=body)
 
     return httpx.MockTransport(answer)

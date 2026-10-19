@@ -205,7 +205,7 @@ def test_an_id_is_escaped_whole_into_its_route(engine):
         media.transcribe("a/b?c")
 
     assert state.requests == ["/api/media/a%2Fb%3Fc/transcribe?words=true"]
-    assert (refused.value.status, refused.value.detail) == (404, "No such media: a/b?c")
+    assert (refused.value.status, refused.value.detail) == (404, "no such media: it was never uploaded here, has expired, or was deleted")
 
 
 # ─── an analysis ──────────────────────────────────────────────────────────────
@@ -257,7 +257,8 @@ def test_a_tuning_the_engine_refuses_is_refused_with_its_reason(engine):
     with pytest.raises(EngineRefused) as refused:
         media.analyze(upload, ["peaks"], peaks_rate=5000)
 
-    assert (refused.value.status, refused.value.detail) == (422, "peaks_rate must be an integer from 1 to 1000")
+    assert (refused.value.status, refused.value.detail) == (
+        422, "peaks_rate: Input should be less than or equal to 1000")
 
 
 @pytest.mark.parametrize(("tuning", "missing"), [
@@ -562,13 +563,13 @@ def test_a_refusal_carries_the_engine_s_status_and_reason(engine):
         media.upload(b"plain words", "text/plain")
 
     assert refused.value.status == 415
-    assert refused.value.detail.startswith("Unsupported media type 'text/plain'. Allowed: audio/wav")
+    assert refused.value.detail.startswith("unsupported media type 'text/plain'; vox.engine takes audio/aac, ")
     assert str(refused.value).startswith(f"the engine at {BASE} refused POST /api/media with 415: ")
 
 
 @pytest.mark.parametrize(("source", "detail"), [
-    (b"RIFF but nothing after it", "No decodable audio in the upload"),
-    (_wav(0.0), "No audio in the upload"),
+    (b"RIFF but nothing after it", "this media has no audio ffmpeg can decode: "),
+    (_wav(0.0), "this media's audio stream holds no samples"),
 ], ids=["undecodable", "silent"])
 def test_an_upload_the_engine_cannot_take_is_refused_with_its_reason(engine, source, detail):
     media, state = engine
@@ -648,7 +649,7 @@ def test_an_upload_the_engine_does_not_hold_is_refused(engine):
     for act in (lambda: media.transcribe("gone"), lambda: media.analyze("gone")):
         with pytest.raises(EngineRefused) as refused:
             act()
-        assert (refused.value.status, refused.value.detail) == (404, "No such media: gone")
+        assert (refused.value.status, refused.value.detail) == (404, "no such media: it was never uploaded here, has expired, or was deleted")
 
 
 @pytest.mark.parametrize(("status", "answer", "detail"), [

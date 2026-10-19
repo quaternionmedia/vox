@@ -412,7 +412,7 @@ def test_a_refusal_s_reason_is_read_in_this_contract_s_spelling(media):
         engine.upload(b"plain words", "text/plain")
 
     assert refused.value.status == 415
-    assert refused.value.detail.startswith("Unsupported media type 'text/plain'")
+    assert refused.value.detail.startswith("unsupported media type 'text/plain'")
 
 
 def test_a_feature_the_contract_does_not_name_is_refused_on_either_contract(media):
