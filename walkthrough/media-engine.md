@@ -1,10 +1,9 @@
 # The media surface, as it ran
 
-Recorded by `walkthrough/test_media_engine.py` on every `uv run pytest`.
-Do not edit: the next test run overwrites it. No test compares it with a
-stored copy, but CI does: after the suite rewrites it, CI fails if it
-differs from the copy committed, so a change in what happened is a diff to
-commit with the change. If this page is wrong, the walkthrough is wrong.
+Recorded by `walkthrough/test_media_engine.py` on every `uv run pytest`, which
+overwrites it: do not edit. CI fails if the rewritten page differs from the
+committed one, so a change in what happened is a diff to commit with the
+change. If this page is wrong, the walkthrough is wrong.
 
 ## What went up
 
@@ -46,17 +45,17 @@ What the engine said it offers, asked first:
 4. `/api/media/m1/analyze?features=beats%2Csilence%2Cpeaks`
 5. `/api/media/m1`
 
-Five requests, over HTTP, on a port the OS chose, every path and parameter
-in the default contract's spelling. `silences` went out as `silence`, the
-engine's own name for it. The last request is the upload discarded as the
-`with` block ended; nothing in the walkthrough asked for it.
+Five requests over HTTP, on a port the OS chose, every path and parameter in
+the default contract's spelling. `silences` went out as `silence`, the
+engine's name for it. The last is the upload discarded as the `with` block
+ended; the walkthrough did not ask for it.
 
 ## What this does not show
 
-The engine is `vox.engine`, and its transcript and analysis are the script
-it was handed: the narration's length is real, read from the WAV, and
-**no claim is made here about what the narration says or how it sounds**.
-That is what a real engine answers, and whisper does not read `FormantTTS`
+The engine is `vox.engine`, and its transcript and analysis are the script it
+was handed. The narration's length is real, read from the WAV, but **no claim
+is made here about what the narration says or how it sounds**. A real engine
+answers that, and whisper does not read `FormantTTS`
 (`vox.synth.SPEECH_IS_NOT_TRANSCRIBABLE`), so a live check uploads a real
 recording:
 
@@ -68,5 +67,4 @@ with MediaEngine(JOE, "http://127.0.0.1:8010") as engine:   # joe: uv run uvicor
     print(engine.transcribe(engine.upload("speech.wav", "audio/wav")))
 ```
 
-That run is not deterministic and is not in this suite. It answers the
-other half of the question.
+That run is not deterministic and is not in this suite.
