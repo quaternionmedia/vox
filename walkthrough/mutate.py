@@ -265,6 +265,22 @@ MUTATIONS = [
         why="A question would be cut short on a guess whenever the engine stalled.",
     ),
     Mutation(
+        name="an engine's reason for refusing its devices is dropped",
+        path="vox/stt.py",
+        find="            return {**unavailable, self.contract.detail_key: reason} if reason else unavailable",
+        replace="            return unavailable",
+        catches="tests/test_stt.py::test_devices_keeps_the_engine_s_reason_for_refusing",
+        why="An engine whose microphone is turned off would read as one with no microphone, and a person would go looking for hardware that is there.",
+    ),
+    Mutation(
+        name="doctor reads a refused microphone as none found",
+        path="vox/cli.py",
+        find="            elif refused:",
+        replace="            elif False:",
+        catches="tests/test_cli.py::test_doctor_says_why_when_the_engine_refuses_its_microphone",
+        why="doctor would say no microphone was found on a machine whose engine names the one setting that turns it on.",
+    ),
+    Mutation(
         name="the media client asks a fixed transcribe route rather than its contract's",
         path="vox/media.py",
         find='        route = self._offered("media_transcribe", "transcripts")',

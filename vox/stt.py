@@ -24,6 +24,16 @@ ANNOUNCE_TIMEOUT = 2.0
 CONTROL_TIMEOUT = 0.5
 
 
+def _reason(resp: httpx.Response, key: str) -> str | None:
+    """Why the engine refused, as its body says under `key`; None when it
+    says nothing there that is a sentence."""
+    try:
+        reason = resp.json().get(key)
+    except (ValueError, AttributeError):
+        return None
+    return reason if isinstance(reason, str) and reason.strip() else None
+
+
 class SpeechToText(Protocol):
     """What a speech-to-text backend must provide."""
 
@@ -182,17 +192,23 @@ class HttpSTT:
         checks before attempting `listen()`, rather than finding out from an
         opaque failure partway through.
 
-        Returns the engine's own body. If it cannot be reached at all, the
-        availability key is False and the device list empty rather than
-        raising: unreachable and no-microphone both mean "listen() will not
-        work right now".
+        Returns the engine's own body. If it cannot be reached at all, or
+        refuses, the availability key is False and the device list empty
+        rather than raising: unreachable, refused and no-microphone all mean
+        "listen() will not work right now". A refusal's reason is kept under
+        the contract's `detail_key`, when the engine gave one, so a caller can
+        say why: an engine that records only once told to answers a refusal
+        naming the setting that tells it.
         """
+        unavailable = {self.contract.devices_key: [], self.contract.available_key: False}
         try:
             resp = self.client.get(self._url(self.contract.devices), timeout=self.timeout)
-            resp.raise_for_status()
-            return resp.json()
         except httpx.HTTPError:
-            return {self.contract.devices_key: [], self.contract.available_key: False}
+            return unavailable
+        if not resp.is_success:
+            reason = _reason(resp, self.contract.detail_key)
+            return {**unavailable, self.contract.detail_key: reason} if reason else unavailable
+        return resp.json()
 
     def microphone_available(self) -> bool:
         """Read the availability flag without the caller knowing its key."""

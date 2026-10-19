@@ -245,7 +245,8 @@ class EngineContract:
     leave any of them out."""
 
     detail_key: str = "detail"
-    """Where a refusal on the media surface says why."""
+    """Where a refusal says why: on the media surface, and from `devices`,
+    where an engine that records only once told to says how to tell it."""
 
     def __post_init__(self) -> None:
         for name in MEDIA_ROUTES_WITH_AN_ID:

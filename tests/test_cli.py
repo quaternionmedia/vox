@@ -13,6 +13,14 @@ runner = CliRunner()
 CONTRACT = EngineContract()
 
 
+MICROPHONE_OFF = (
+    "the microphone is off on this joe: JOE_ALLOW_MICROPHONE=1 turns it on, for whatever can reach this "
+    "port -- joe has no authentication (docs/security.md)"
+)
+"""joe's refusal of a microphone route while its microphone is off, from
+`Modules/Access.py`'s `refusal` on joe's `fix/security-defaults` at `41d3ed8`."""
+
+
 def _fake_stt(**attrs) -> MagicMock:
     """A stand-in client that also works as a context manager.
 
@@ -106,6 +114,24 @@ def test_doctor_fails_when_no_microphone(monkeypatch):
 
     assert result.exit_code == 1
     assert "[fail] microphone: none found" in result.output
+
+
+def test_doctor_says_why_when_the_engine_refuses_its_microphone(monkeypatch):
+    """A joe from `fix/security-defaults` on refuses its devices route 403
+    until `JOE_ALLOW_MICROPHONE=1`, naming that setting. doctor says so, in
+    the engine's words, rather than reporting no microphone.
+
+    Seen to fail by ignoring the reason: doctor said "none found"."""
+    _install_fake_pyttsx3(monkeypatch)
+    refused = {CONTRACT.devices_key: [], CONTRACT.available_key: False, CONTRACT.detail_key: MICROPHONE_OFF}
+    fake_stt = _fake_stt(reachable=True, devices=refused)
+
+    with patch("vox.cli.HttpSTT", return_value=fake_stt):
+        result = runner.invoke(cli.app, ["doctor"])
+
+    assert result.exit_code == 1
+    assert f"[fail] microphone: the engine refused to list its inputs: {MICROPHONE_OFF}" in result.output
+    assert "none found" not in result.output
 
 
 def test_doctor_fails_when_tts_does_not_initialize(monkeypatch):
