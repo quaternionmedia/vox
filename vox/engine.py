@@ -35,6 +35,7 @@ import os
 import re
 import struct
 import threading
+import time
 import wave
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -71,6 +72,10 @@ stands in for. A larger upload is answered 413."""
 MEDIA_SECONDS = 7200.0
 """The longest sound the media upload takes, in seconds: two hours, the
 default of the engine it stands in for. A longer one is answered 413."""
+
+MEDIA_TTL = 3600.0
+"""How long an upload is kept after it was last used, in seconds: an hour,
+the default of the engine it stands in for."""
 
 LANGUAGES = {
     "en": "english", "zh": "chinese", "de": "german", "es": "spanish", "ru": "russian", "ko": "korean",
@@ -240,6 +245,16 @@ class EngineState:
     """The longest sound an upload may hold, in seconds. A longer one is
     answered 413; None takes a sound of any length."""
 
+    media_ttl: float | None = MEDIA_TTL
+    """How many seconds of `clock` an upload is kept after it was last used:
+    uploaded, transcribed or analysed. Past that it is answered 404, as an id
+    never handed out is, and the next upload sweeps it away. None keeps every
+    upload until it is deleted."""
+
+    clock: Callable[[], float] = time.monotonic
+    """What `media_ttl` is counted on. A test hands it a clock it moves
+    itself, rather than waiting out an hour."""
+
     decoder: bool = True
     """Whether the engine has the decoder its uploads are read with. False
     answers every upload 503 once its type and declared size are judged,
@@ -254,10 +269,14 @@ class EngineState:
     of plain samples is read from its own header."""
 
     uploads: dict[str, MediaHandle] = field(default_factory=dict)
-    """What the engine holds, by id: added by an upload, removed by a delete."""
+    """What the engine holds, by id: added by an upload, removed by a delete,
+    or by the sweep an upload makes of those kept past their time."""
 
     _ids: Iterator[int] = field(default_factory=lambda: itertools.count(1), init=False,
                                 repr=False, compare=False)
+
+    _used: dict[str, float] = field(default_factory=dict, init=False, repr=False, compare=False)
+    """When each upload held was last used, by `clock`."""
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -585,13 +604,30 @@ def _language_code(language: str | None) -> str | None:
     return code
 
 
+def _expired(state: EngineState, media_id: str, now: float) -> bool:
+    used = state._used.get(media_id)
+    return state.media_ttl is not None and used is not None and now - used > state.media_ttl
+
+
 def _use(state: EngineState, media_id: str) -> MediaHandle:
-    """The upload `media_id` names. Refused 404 when the engine does not hold
-    it: it keeps an upload until it is deleted."""
+    """The upload `media_id` names, its last use now. Refused 404 when the
+    engine does not hold it, or holds it past its time."""
     upload = state.uploads.get(media_id)
-    if upload is None:
+    now = state.clock()
+    if upload is None or _expired(state, media_id, now):
         raise _Refused(404, _NOT_HELD)
+    state._used[media_id] = now
     return upload
+
+
+def _sweep(state: EngineState) -> None:
+    """Discard every upload kept past its time, as the stood-in engine sweeps
+    them as each upload arrives."""
+    now = state.clock()
+    for media_id in list(state.uploads):
+        if _expired(state, media_id, now):
+            state.uploads.pop(media_id, None)
+            state._used.pop(media_id, None)
 
 
 def _answer_media(state: EngineState, route: tuple[str, str | None], query: dict[str, list[str]],
@@ -632,8 +668,7 @@ def _media_capabilities(state: EngineState) -> dict:
         contract.word_timestamps_key: True,
         contract.max_bytes_key: state.media_limit,
         contract.max_seconds_key: state.media_seconds,
-        # It keeps an upload until it is deleted.
-        contract.ttl_seconds_key: None,
+        contract.ttl_seconds_key: state.media_ttl,
     }
 
 
@@ -652,12 +687,14 @@ def _media_upload(state: EngineState, content_type: str | None, declared: str,
         raise _Refused(413, too_large)
     if not state.decoder:
         raise _Refused(503, "ffmpeg was not found: EngineState.decoder is False")
+    _sweep(state)
     body = read()
     if len(body) > state.media_limit:
         raise _Refused(413, too_large)
     seconds, rate, channels = _sound(state, body)
     handle = MediaHandle(f"m{next(state._ids)}", round(seconds, 3), rate, channels, True)
     state.uploads[handle.media_id] = handle
+    state._used[handle.media_id] = state.clock()
     return {
         contract.media_id_key: handle.media_id,
         contract.duration_key: handle.duration,
@@ -801,8 +838,11 @@ def _media_analyze(state: EngineState, media_id: str, query: dict[str, list[str]
 
 
 def _media_delete(state: EngineState, media_id: str) -> None:
+    # An upload kept past its time is deleted all the same until a sweep has
+    # taken it, as in the stood-in engine.
     if state.uploads.pop(media_id, None) is None:
         raise _Refused(404, _NOT_HELD)
+    state._used.pop(media_id, None)
 
 
 def _shown_feature(name: str, value, contract: EngineContract):

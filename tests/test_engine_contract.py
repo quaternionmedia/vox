@@ -749,7 +749,7 @@ def test_media_capabilities_list_joe_s_formats_in_order_and_none_without_a_decod
         unable = client.get("/api/media/capabilities").json()
 
     assert able["formats"] == sorted(MEDIA_FORMATS) and len(able["formats"]) == 20
-    assert (able["max_bytes"], able["max_seconds"], able["ttl_seconds"]) == (1024**3, 7200.0, None)
+    assert (able["max_bytes"], able["max_seconds"], able["ttl_seconds"]) == (1024**3, 7200.0, 3600.0)
     assert unable["formats"] == []
 
 
@@ -778,6 +778,59 @@ def test_a_media_id_is_never_reused(media_engine):
     second = _upload(client, _wav(0.1))
 
     assert (first.json()["media_id"], second.json()["media_id"]) == ("m1", "m2")
+
+
+class _Clock:
+    """A clock a test moves itself."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_an_upload_unused_for_longer_than_it_is_kept_is_404():
+    """joe keeps an upload `JOE_MEDIA_TTL` seconds after it was last used --
+    uploaded, transcribed or analysed -- and answers 404 for it after, as
+    for an id it never handed out; the stand-in counts `media_ttl` on its
+    `clock`.
+
+    Seen to fail with nothing expiring: the upload unused past its time was
+    transcribed and analysed, 200. Seen to fail with a use not counted: the
+    upload used at the edge of its time was 404 fifty-nine seconds later."""
+    clock = _Clock()
+    with serve(EngineState(media_ttl=60.0, clock=clock)) as (base_url, _), \
+            _client(base_url) as client:
+        _upload(client, _wav(1.0))
+        clock.now += 60.0
+        at_the_edge = client.post("/api/media/m1/transcribe")
+        clock.now += 59.0
+        used_since = client.post("/api/media/m1/analyze")
+        clock.now += 60.5
+        past_it = [client.post("/api/media/m1/transcribe"), client.post("/api/media/m1/analyze")]
+
+    assert (at_the_edge.status_code, used_since.status_code) == (200, 200)
+    assert [(r.status_code, r.json().get("detail")) for r in past_it] == [(404, NOT_HELD)] * 2
+
+
+def test_an_upload_kept_past_its_time_goes_at_the_next_upload_and_deletes_until_then():
+    """joe sweeps what it has kept past its time as each upload arrives, and
+    a delete takes one no sweep has yet.
+
+    Seen to fail with no sweep: the upload past its time was still held
+    after the next one arrived."""
+    clock = _Clock()
+    with serve(EngineState(media_ttl=60.0, clock=clock)) as (base_url, state), \
+            _client(base_url) as client:
+        _upload(client, _wav(1.0))
+        _upload(client, _wav(1.0))
+        clock.now += 61.0
+        deleted = client.delete("/api/media/m1")
+        _upload(client, _wav(1.0))
+
+    assert deleted.status_code == 204
+    assert set(state.uploads) == {"m3"}
 
 
 @pytest.mark.parametrize(("name", "value", "status"), [
