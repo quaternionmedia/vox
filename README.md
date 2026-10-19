@@ -25,9 +25,8 @@ audio or video --> MediaEngine.upload --+--> transcribe --> segments and words, 
   a video and reads back a timed transcript and what the sound measures, as
   dataclasses.
 - **`TextToSpeech`** is the synthesis protocol, with three backends:
-  `recording` (a codec, deterministic, not audible as words), `formant`
-  (audible, deterministic, nothing to install) and `pyttsx3` (a real system
-  voice). `--voice` picks one.
+  `recording`, a codec; `formant`; and `pyttsx3`, a real system voice.
+  `--voice` picks one (*Which voice to use*, below).
 - **`VoiceSession`** is the orchestration. `self_report_*` proves audio → text
   → audio; `round_trip` closes the loop by handing vox's own output back.
 - **`vox.adapters`** is the only place a product is named.
@@ -77,10 +76,9 @@ said.wav --> engine --> "approve the deploy" --> TTS --> echo.wav --> engine -->
                                                                      closed  <---------+
 ```
 
-`--offline` runs it against `vox.engine`, a real HTTP server on a port the OS
-picks, answering whichever contract it was handed. It needs no model download,
-microphone or speakers, and gives the same bytes every run, so a test can
-assert on the loop. *The offline engine* below says what it holds a caller to.
+`--offline` runs it against `vox.engine`, a real HTTP server (*The offline
+engine*, below). It needs no model download, microphone or speakers, and gives
+the same bytes every run, so a test can assert on the loop.
 
 **It is a codec, not a voice.** `vox.engine` carries text faithfully through a
 real WAV file. That proves the seam, and nothing about transcription accuracy.
@@ -265,9 +263,8 @@ media surface.
   than WAV holds. `media_limit`, `media_seconds`, and `media_ttl`, counted on
   `clock`, are the limits joe takes from its settings, and `decoder` is
   whether it has ffmpeg. A delete is 204 with no body, and no id is handed
-  out twice.
-  `media_transport(state)` answers the same surface in-process, as an
-  `httpx.MockTransport` for a client built around it.
+  out twice. `media_transport(state)` answers the same surface in-process,
+  as an `httpx.MockTransport` for a client built around it.
   `tests/test_engine_contract.py` names the joe commit each answer was read
   at.
 
@@ -301,9 +298,9 @@ beside what `vox.engine` does with the same request:
 Where both refuse, the status and the body are the same: `{"detail": str}`
 under the contract's `detail_key`, in joe's sentence. Where joe's sentence
 names joe or one of its settings, the stand-in's names `vox.engine` or the
-`EngineState` field instead. As joe's framework does, it reads a parameter
-given twice at its last and a blank one as given, and an analysis answers
-its features in joe's order whatever the order asked.
+`EngineState` field instead. As joe's framework does, the stand-in reads a
+parameter given twice at its last and a blank one as given, and an analysis
+answers its features in joe's order whatever the order asked.
 `tests/test_engine_contract.py` holds the stand-in to each refusal and each
 order the two share.
 
