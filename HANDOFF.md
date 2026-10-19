@@ -89,14 +89,24 @@ uv run vox doctor             # engine reachable, a microphone, synthesis
 uv run vox loop --echo-dir <the engine's own audio directory>
 ```
 
+A joe from `fix/security-defaults` on serves its media API alone until
+told. Start it with `JOE_ALLOW_MICROPHONE=1` for `vox doctor` and a live
+`vox self-report`, and with `JOE_ALLOW_LIBRARY=1` for `vox loop` and
+`vox self-report FILE`, which transcribe a file by name: joe's
+`docs/security.md`, *Which settings each consumer needs*, lists each. A
+capability left off answers 403 naming its setting, and `vox doctor` prints
+that sentence. joe has no authentication, so whatever can reach its port
+gets what is turned on; keep it on loopback.
+
 `--echo-dir` has to be somewhere the engine resolves filenames against,
 because closing the loop means handing vox's output back to it and the
 contract takes a filename rather than an upload. The two share a filesystem
 in a local loop and would not across hosts.
 
-The media surface takes an upload, so it has no such constraint. Against
-joe, started in its checkout on a port that is not 8000 (joe's CLI binds
-8000, which is alfred's):
+The media surface takes an upload, so it has no such constraint, and a
+fresh joe serves it with nothing turned on. Against joe, started in its
+checkout on a port that is not 8000 (joe's CLI binds 8000, which is
+alfred's):
 
 ```sh
 uv run uvicorn api:app --port 8010     # in joe's checkout, ffmpeg on PATH or named by JOE_FFMPEG

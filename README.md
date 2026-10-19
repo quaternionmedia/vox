@@ -48,6 +48,16 @@ uv run vox self-report clip.wav           # a file the engine can already resolv
 uv run vox self-report --duration 5       # record from the engine's mic instead
 ```
 
+A joe from its `fix/security-defaults` on serves its media API and nothing
+else until told, and answers a route whose capability is off 403, naming the
+setting that turns it on. `vox doctor` and a live `vox self-report` use its
+microphone, so start it with `JOE_ALLOW_MICROPHONE=1`; `vox loop` and
+`vox self-report FILE` ask it to transcribe a file by name, which takes
+`JOE_ALLOW_LIBRARY=1`. joe has no authentication, so a capability turned on
+is on for whatever can reach its port: keep it on loopback. `vox doctor`
+prints the sentence joe refuses its microphone with, and `MediaEngine` needs
+nothing set.
+
 `--engine` selects an adapter and `--url` overrides where it listens. An
 unknown name is refused and the message lists what there is.
 
