@@ -617,6 +617,14 @@ MUTATIONS = [
         why="`EngineState.uploads` would hold what the real engine has thrown away, and a test reading it would be told a leak that is not one.",
     ),
     Mutation(
+        name="a failure of the stand-in's own drops the connection",
+        path="vox/engine.py",
+        find='        return 500, {state.contract.detail_key: f"{type(exc).__name__}: {exc}"}',
+        replace="        raise",
+        catches="tests/test_engine_contract.py::test_a_failure_of_the_engine_s_own_is_answered_500_naming_it",
+        why="A caller's handling of an engine that broke could not be tested offline, and a failure would read as an engine that is down.",
+    ),
+    Mutation(
         name="narration written by the platform voice is also played",
         path="vox/adapters/pyttsx3.py",
         find="            _sapi_speak(text, out_path, False, None)",

@@ -963,6 +963,28 @@ def test_a_blank_parameter_is_read_as_given_not_dropped(media_engine):
     assert set(answers[2].json()) == {"duration", *TEMPO_TO_PEAKS}
 
 
+@pytest.mark.parametrize("script", [
+    {"transcript": RuntimeError("the model would not load")},
+    {"analysis": RuntimeError("the model would not load")},
+], ids=["transcript", "analysis"])
+def test_a_failure_of_the_engine_s_own_is_answered_500_naming_it(script, capfd):
+    """joe answers a failure of its own on any media route 500, its detail
+    naming the exception, and puts the traceback in its log. A script that
+    is an exception is the stand-in's way to fail so, and every time it is
+    asked.
+
+    Seen to fail by letting the failure escape: the connection dropped with
+    no answer (httpx.RemoteProtocolError)."""
+    with serve(EngineState(**script)) as (base_url, _), _client(base_url) as client:
+        _upload(client, _wav(1.0))
+        route = "transcribe" if "transcript" in script else "analyze"
+        answers = [client.post(f"/api/media/m1/{route}") for _ in range(2)]
+
+    assert [(r.status_code, r.json()) for r in answers] == [
+        (500, {"detail": "RuntimeError: the model would not load"})] * 2
+    assert "RuntimeError: the model would not load" in capfd.readouterr().err
+
+
 def test_the_media_surface_answers_the_same_over_a_socket_and_in_process(tmp_path):
     """`media_transport` is the same engine with no socket: the same answers
     to the same requests, recorded the same way."""

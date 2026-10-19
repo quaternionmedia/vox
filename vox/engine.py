@@ -36,6 +36,7 @@ import re
 import struct
 import threading
 import time
+import traceback
 import wave
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -223,17 +224,20 @@ class EngineState:
     one closed, in order. The engine has no microphone to open early, so a
     watch changes nothing it does; recording it is how a test sees it arrived."""
 
-    transcript: Transcript | None = None
+    transcript: Transcript | Exception | None = None
     """What the media surface's transcribe answers, for any upload: the test's
     script for what was said in it. None answers an empty transcript. Asked
     for no words, it answers the segments without theirs; asked for a
-    language, it answers in that language's code."""
+    language, it answers in that language's code. An exception is the engine
+    failing to hear it: raised as a failure of the engine's own, and answered
+    500 naming it."""
 
-    analysis: Analysis | None = None
+    analysis: Analysis | Exception | None = None
     """What the media surface's analyze answers for each feature asked for,
     for any upload: the test's script for what its sound measures. A feature
     the script leaves None is answered null, and so is every feature when
-    the script is None. The duration answered is the upload's own."""
+    the script is None. The duration answered is the upload's own. An
+    exception is answered 500, as for `transcript`."""
 
     media_formats: tuple[str, ...] = MEDIA_FORMATS
     """The content types an upload is taken in. Any other is answered 415."""
@@ -637,7 +641,9 @@ def _answer_media(state: EngineState, route: tuple[str, str | None], query: dict
     body of None is an answer with none, as a delete's is.
 
     `declared` is the request's Content-Length as sent, and `read` reads its
-    body, which an upload alone asks for, once its headers have been judged."""
+    body, which an upload alone asks for, once its headers have been judged.
+    A failure of the stand-in's own is answered 500 naming it, as the stood-in
+    engine answers one of its own, with the traceback on stderr."""
     name, media_id = route
     try:
         if name == "upload":
@@ -652,6 +658,9 @@ def _answer_media(state: EngineState, route: tuple[str, str | None], query: dict
         return 204, None
     except _Refused as refusal:
         return refusal.status, {state.contract.detail_key: refusal.detail}
+    except Exception as exc:  # noqa: BLE001 -- the stood-in engine's 500, as it answers a failure of its own
+        traceback.print_exc()
+        return 500, {state.contract.detail_key: f"{type(exc).__name__}: {exc}"}
 
 
 def _media_capabilities(state: EngineState) -> dict:
@@ -788,7 +797,10 @@ def _media_transcribe(state: EngineState, media_id: str, query: dict[str, list[s
                                 "unable to interpret input")
     _use(state, media_id)
     language = _language_code(_last(query, contract.language_param))
-    script = state.transcript or Transcript(text="", language=None, segments=())
+    script = state.transcript
+    if isinstance(script, Exception):
+        raise script.with_traceback(None)
+    script = script or Transcript(text="", language=None, segments=())
     segments = []
     for segment in script.segments:
         segments.append({
@@ -827,7 +839,10 @@ def _media_analyze(state: EngineState, media_id: str, query: dict[str, list[str]
     upload = _use(state, media_id)
     # None named measures every one, as the stood-in engine does.
     asked = {offered[n] for n in names} if names else set(offered.values())
-    script = state.analysis or Analysis()
+    script = state.analysis
+    if isinstance(script, Exception):
+        raise script.with_traceback(None)
+    script = script or Analysis()
     body: dict = {contract.duration_key: upload.duration}
     # The duration first, then each feature asked for in the order the engine
     # gives them, whatever the order asked.
