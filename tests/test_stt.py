@@ -22,6 +22,14 @@ def _stt_with(client, **kwargs) -> HttpSTT:
     return HttpSTT(kwargs.pop("base_url", "http://127.0.0.1:8000"), client=client, **kwargs)
 
 
+MICROPHONE_OFF = (
+    "the microphone is off on this joe: JOE_ALLOW_MICROPHONE=1 turns it on, for whatever can reach this "
+    "port -- joe has no authentication (docs/security.md)"
+)
+"""joe's refusal of a microphone route while its microphone is off, from
+`Modules/Access.py`'s `refusal` on joe's `fix/security-defaults` at `41d3ed8`."""
+
+
 def test_transcribe_file_posts_filename_and_returns_text():
     client = MagicMock()
     client.post.return_value = _fake_response({"text": "hello", "segments": [], "language": "en"})
@@ -128,6 +136,24 @@ def test_devices_reports_unavailable_when_joe_is_unreachable():
     client.get.side_effect = httpx.ConnectError("refused")
 
     assert _stt_with(client).devices() == {"devices": [], "microphone_available": False}
+
+
+def test_devices_keeps_the_engine_s_reason_for_refusing():
+    """An engine that records only once told to refuses to list its inputs
+    until then, and says which setting tells it, as joe's
+    `fix/security-defaults` does while `JOE_ALLOW_MICROPHONE` is off. The
+    reason is kept under the contract's `detail_key`; a refusal with nothing
+    to say adds nothing.
+
+    Seen to fail by dropping the reason: the refusal read as an empty list,
+    the same as a machine with no microphone."""
+    refusing = httpx.MockTransport(lambda request: httpx.Response(403, json={"detail": MICROPHONE_OFF}))
+    silent = httpx.MockTransport(lambda request: httpx.Response(500, text="Internal Server Error"))
+
+    with httpx.Client(transport=refusing) as refused, httpx.Client(transport=silent) as broken:
+        assert _stt_with(refused).devices() == {
+            "devices": [], "microphone_available": False, "detail": MICROPHONE_OFF}
+        assert _stt_with(broken).devices() == {"devices": [], "microphone_available": False}
 
 
 def test_reachable_true_on_200():

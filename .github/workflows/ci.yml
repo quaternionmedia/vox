@@ -18,12 +18,13 @@ jobs:
       - name: tests and walkthrough
         run: uv run pytest -q
 
-      # The walkthrough rewrites `walkthrough/closed-loop.md` as it runs. If
-      # the committed copy differs, the artifact describes behaviour the code
-      # no longer has, which is the failure mode a recorded artifact exists to
-      # make impossible. Drift is a fail rather than a silent overwrite.
+      # The walkthrough rewrites `walkthrough/closed-loop.md` and
+      # `walkthrough/media-engine.md` as it runs. If a committed copy differs,
+      # the artifact describes behaviour the code no longer has, which is the
+      # failure mode a recorded artifact exists to make impossible. Drift is a
+      # fail rather than a silent overwrite.
       - name: the recorded walkthrough is current
-        run: git diff --exit-code -- walkthrough/closed-loop.md
+        run: git diff --exit-code -- walkthrough/closed-loop.md walkthrough/media-engine.md
 
       # An editable install resolves imports against the source tree, so a
       # subpackage the build never declared is importable in development and
