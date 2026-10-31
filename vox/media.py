@@ -493,7 +493,7 @@ def _read_capabilities(answer: Any, c: EngineContract) -> Capabilities:
 class MediaEngine:
     """The media surface of any engine matching an `EngineContract`.
 
-        with MediaEngine(contract, "http://127.0.0.1:8010") as engine:
+        with MediaEngine(contract, "http://127.0.0.1:1059") as engine:
             upload = engine.upload("mix.wav", "audio/wav")
             transcript = engine.transcribe(upload)
             analysis = engine.analyze(upload, ["beats", "silences"])

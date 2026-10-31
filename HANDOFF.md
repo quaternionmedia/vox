@@ -104,18 +104,18 @@ filename, not an upload. The two share a filesystem in a local loop, and
 would not across hosts.
 
 The media surface takes an upload, so it has no such constraint, and a fresh
-joe serves it with nothing turned on. Start joe in its checkout on a port
-other than 8000 (joe's CLI binds 8000, which is alfred's):
+joe serves it with nothing turned on. Start joe in its checkout on 1059, its
+place in qm's port allocation:
 
 ```sh
-uv run uvicorn api:app --port 8010     # in joe's checkout, ffmpeg on PATH or named by JOE_FFMPEG
+uv run uvicorn api:app --port 1059     # in joe's checkout, ffmpeg on PATH or named by JOE_FFMPEG
 ```
 
 ```python
 from vox import MediaEngine
 from vox.adapters import JOE
 
-with MediaEngine(JOE, "http://127.0.0.1:8010") as engine:
+with MediaEngine(JOE, "http://127.0.0.1:1059") as engine:
     upload = engine.upload("speech.wav", "audio/wav")
     print(engine.transcribe(upload), engine.analyze(upload))
 ```
