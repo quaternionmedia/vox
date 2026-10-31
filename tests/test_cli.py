@@ -61,7 +61,7 @@ def test_a_known_engine_resolves_to_its_contract_and_url():
     contract, url = cli._resolve("joe", None)
 
     assert contract == JOE
-    assert url == "http://127.0.0.1:8000"
+    assert url == "http://127.0.0.1:1059"
 
 
 def test_an_explicit_url_overrides_the_adapter_s_default():
@@ -189,10 +189,10 @@ def test_loop_offline_closes_without_an_engine_or_hardware(tmp_path):
 
 
 def test_loop_offline_binds_an_ephemeral_port(tmp_path):
-    """Never 8000, the adapter's default: a fixed port can be another program's server."""
+    """Never 1059, the adapter's default: a fixed port can be another program's server."""
     result = runner.invoke(cli.app, ["loop", "--offline", "--echo-dir", str(tmp_path)])
 
-    assert ":8000" not in result.output
+    assert ":1059" not in result.output
     assert "ephemeral port" in result.output
 
 

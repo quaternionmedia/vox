@@ -43,7 +43,7 @@ def _resolve(engine: str, url: str | None):
         known = ", ".join(sorted(p.stem for p in Path(adapters.__file__).parent.glob("[!_]*.py")))
         typer.echo(f"No engine adapter named {engine!r}. Known: {known}", err=True)
         raise typer.Exit(2) from None
-    return contract, url or getattr(module, "DEFAULT_URL", "http://127.0.0.1:8000")
+    return contract, url or getattr(module, "DEFAULT_URL", "http://127.0.0.1:1059")
 
 
 def _synthesizer(voice: str):

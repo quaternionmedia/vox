@@ -19,7 +19,7 @@ def _fake_response(payload: dict):
 
 
 def _stt_with(client, **kwargs) -> HttpSTT:
-    return HttpSTT(kwargs.pop("base_url", "http://127.0.0.1:8000"), client=client, **kwargs)
+    return HttpSTT(kwargs.pop("base_url", "http://127.0.0.1:1059"), client=client, **kwargs)
 
 
 def test_transcribe_file_posts_filename_and_returns_text():
@@ -29,7 +29,7 @@ def test_transcribe_file_posts_filename_and_returns_text():
 
     assert stt.transcribe_file("clip.wav") == "hello"
     client.post.assert_called_once_with(
-        "http://127.0.0.1:8000/api/voice/transcribe",
+        "http://127.0.0.1:1059/api/voice/transcribe",
         params={"filename": "clip.wav"},
         timeout=60.0,
     )
@@ -40,11 +40,11 @@ def test_listen_posts_duration_and_returns_text_and_path():
     client.post.return_value = _fake_response(
         {"text": "go", "segments": [], "language": "en", "audio_path": "Data/Voice/capture_x.wav"}
     )
-    stt = _stt_with(client, base_url="http://127.0.0.1:8000/", timeout=10.0)
+    stt = _stt_with(client, base_url="http://127.0.0.1:1059/", timeout=10.0)
 
     assert stt.listen(duration=3.0) == ("go", "Data/Voice/capture_x.wav")
     client.post.assert_called_once_with(
-        "http://127.0.0.1:8000/api/voice/listen",
+        "http://127.0.0.1:1059/api/voice/listen",
         params={"duration": 3.0},
         timeout=13.0,
     )
@@ -65,7 +65,7 @@ def test_listen_sends_the_pause_when_the_contract_names_it_and_a_value_is_given(
 
     assert stt.listen(duration=3.0, pause_ms=1500) == ("go", "cap.wav")
     client.post.assert_called_once_with(
-        "http://127.0.0.1:8000/api/voice/listen",
+        "http://127.0.0.1:1059/api/voice/listen",
         params={"duration": 3.0, "silence_ms": 1500},
         timeout=13.0,
     )
@@ -84,7 +84,7 @@ def test_listen_sends_no_pause_on_a_contract_without_one():
 
     stt.listen(duration=3.0, pause_ms=1500)
     client.post.assert_called_once_with(
-        "http://127.0.0.1:8000/api/voice/listen",
+        "http://127.0.0.1:1059/api/voice/listen",
         params={"duration": 3.0},
         timeout=13.0,
     )
@@ -104,7 +104,7 @@ def test_listen_sends_no_pause_when_none_was_given():
 
     stt.listen(duration=3.0)
     client.post.assert_called_once_with(
-        "http://127.0.0.1:8000/api/voice/listen",
+        "http://127.0.0.1:1059/api/voice/listen",
         params={"duration": 3.0},
         timeout=13.0,
     )
@@ -120,7 +120,7 @@ def test_devices_returns_the_engines_report():
     stt = _stt_with(client)
 
     assert stt.devices() == payload
-    client.get.assert_called_once_with("http://127.0.0.1:8000/api/voice/devices", timeout=60.0)
+    client.get.assert_called_once_with("http://127.0.0.1:1059/api/voice/devices", timeout=60.0)
 
 
 def test_devices_reports_unavailable_when_joe_is_unreachable():
@@ -153,7 +153,7 @@ def test_announce_posts_the_state_to_the_conversation_route_briefly():
 
     assert stt.announce("speaking", "I heard: banana.", reason="nomatch") is True
     client.post.assert_called_once_with(
-        "http://127.0.0.1:8000/api/voice/conversation",
+        "http://127.0.0.1:1059/api/voice/conversation",
         json={"state": "speaking", "text": "I heard: banana.", "reason": "nomatch"},
         timeout=2.0,
     )
@@ -213,18 +213,18 @@ def test_one_client_serves_every_call():
     http, and the only symptom is a slower loop, so the reuse is asserted
     here.
     """
-    stt = HttpSTT("http://127.0.0.1:8000")
+    stt = HttpSTT("http://127.0.0.1:1059")
     assert stt.client is stt.client
 
 
 def test_it_does_not_build_a_client_until_one_is_needed():
     """Constructing an HttpSTT stays free; `vox doctor` builds several."""
-    stt = HttpSTT("http://127.0.0.1:8000")
+    stt = HttpSTT("http://127.0.0.1:1059")
     assert stt._client is None
 
 
 def test_it_closes_the_client_it_built():
-    stt = HttpSTT("http://127.0.0.1:8000")
+    stt = HttpSTT("http://127.0.0.1:1059")
     with stt:
         client = stt.client
     assert client.is_closed
@@ -234,7 +234,7 @@ def test_it_closes_the_client_it_built():
 def test_it_leaves_a_client_it_was_given_alone():
     """A caller sharing one client across several clients keeps the right to close it."""
     client = httpx.Client()
-    with HttpSTT("http://127.0.0.1:8000", client=client):
+    with HttpSTT("http://127.0.0.1:1059", client=client):
         pass
     assert not client.is_closed
     client.close()
@@ -253,7 +253,7 @@ def test_watch_posts_the_listen_s_parameters_briefly():
 
     assert stt.watch(5.0, pause_ms=800, hint=["approve", "hold"]) is True
     client.post.assert_called_once_with(
-        "http://127.0.0.1:8000/api/voice/watch",
+        "http://127.0.0.1:1059/api/voice/watch",
         params={"duration": 5.0, "silence_ms": 800, "hint": "approve, hold"},
         timeout=2.0,
     )
@@ -265,7 +265,7 @@ def test_unwatch_posts_and_neither_raises_when_the_engine_is_away():
     client = MagicMock()
     client.post.return_value = MagicMock(status_code=200)
     assert _stt_with(client, contract=JOE).unwatch() is True
-    assert client.post.call_args.args == ("http://127.0.0.1:8000/api/voice/unwatch",)
+    assert client.post.call_args.args == ("http://127.0.0.1:1059/api/voice/unwatch",)
 
     client.post.side_effect = httpx.ConnectError("refused")
     stt = _stt_with(client, contract=JOE)
@@ -290,7 +290,7 @@ def test_interrupted_reads_the_engine_s_report_briefly():
     stt = _stt_with(client, contract=JOE, timeout=60.0)
 
     assert stt.interrupted() is True
-    client.get.assert_called_once_with("http://127.0.0.1:8000/api/voice/control", timeout=0.5)
+    client.get.assert_called_once_with("http://127.0.0.1:1059/api/voice/control", timeout=0.5)
 
 
 def test_interrupted_is_false_whenever_the_engine_cannot_say():

@@ -14,7 +14,7 @@ defaults alone; `tests/test_contract.py` checks the two still agree.
     from vox import HttpSTT
     from vox.adapters import JOE
 
-    stt = HttpSTT("http://127.0.0.1:8000", contract=JOE)
+    stt = HttpSTT("http://127.0.0.1:1059", contract=JOE)
 """
 
 from vox.contract import EngineContract
@@ -47,7 +47,8 @@ expected to be, handed to its transcriber as a prompt. `watch` opens a take
 while a question is still being asked, and `control` reports `interrupted`
 once the person has answered by key, held the talk key, or spoken over it."""
 
-DEFAULT_URL = "http://127.0.0.1:8000"
-"""Where `joe backend` listens unless told otherwise. A default, not a promise:
-another program can hold the port, so check what answers there before
+DEFAULT_URL = "http://127.0.0.1:1059"
+"""Where `joe backend` listens unless told otherwise: 1059, the twelfth root of
+two, joe's port in qm's allocation (its `ci/dashboard.py`). A default, not a
+promise: another program can hold the port, so check what answers there before
 measuring against it."""
