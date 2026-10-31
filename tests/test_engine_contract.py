@@ -77,7 +77,7 @@ def test_it_binds_an_ephemeral_port(engine):
     """
     base_url, _, _ = engine
     port = int(base_url.rsplit(":", 1)[1])
-    assert port != 8000
+    assert port != 1059
     assert port > 1024
 
 

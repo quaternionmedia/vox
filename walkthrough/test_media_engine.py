@@ -196,7 +196,7 @@ recording:
 from vox import MediaEngine
 from vox.adapters import JOE
 
-with MediaEngine(JOE, "http://127.0.0.1:8010") as engine:   # joe: uv run uvicorn api:app --port 8010
+with MediaEngine(JOE, "http://127.0.0.1:1059") as engine:   # joe: uv run uvicorn api:app --port 1059
     print(engine.transcribe(engine.upload("speech.wav", "audio/wav")))
 ```
 
