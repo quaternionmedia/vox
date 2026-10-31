@@ -119,9 +119,16 @@ def doctor(engine: str = ENGINE, url: str = URL, voice: str = VOICE):
 
             report = stt.devices()
             devices = report.get(contract.devices_key) or []
+            refused = report.get(contract.detail_key)
             if report.get(contract.available_key):
                 default = next((d for d in devices if d.get("default")), devices[0])
                 typer.echo(f"[ok]   microphone: {default['name']} (on the engine's machine)")
+            elif refused:
+                # An engine that records only once told to refuses to list its
+                # inputs until then, and says which setting tells it: that is
+                # the line a person needs, not "none found".
+                ok = False
+                typer.echo(f"[fail] microphone: the engine refused to list its inputs: {refused}")
             else:
                 ok = False
                 typer.echo("[fail] microphone: none found on the engine's machine.")
@@ -170,7 +177,7 @@ def self_report(
         if filename is None and not stt.microphone_available():
             typer.echo(
                 "No microphone available. Run `vox doctor` for the specific reason "
-                "(engine unreachable, or its machine has no input device).",
+                "(engine unreachable, its microphone turned off, or no input device on its machine).",
                 err=True,
             )
             raise typer.Exit(1)

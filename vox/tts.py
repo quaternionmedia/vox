@@ -18,6 +18,15 @@ class TextToSpeech(Protocol):
         """Synthesize `text` to an audio file. Returns the path written."""
         ...
 
+    def to_wav(self, text: str, path: str | os.PathLike[str]) -> str:
+        """Synthesize `text` to a WAV at `path`, and play nothing. Returns the path written.
+
+        For audio made to be used rather than heard: narration laid under a
+        video, or a clip uploaded to an engine. A backend whose `speak` is
+        heard is silent here.
+        """
+        ...
+
 
 class RecordingTTS:
     """Deterministic synthesis: writes the WAV, drives no sound card.
@@ -46,3 +55,9 @@ class RecordingTTS:
             out_path = os.path.join(self.out_dir, f"speak_{digest}.wav")
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         return encode_wav(text, out_path)
+
+    def to_wav(self, text: str, path: str | os.PathLike[str]) -> str:
+        """The codec's WAV of `text` at `path`, the same bytes `speak` writes."""
+        from vox.engine import encode_wav
+
+        return encode_wav(text, path)
