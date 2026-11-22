@@ -871,6 +871,11 @@ def _shown_feature(name: str, value, contract: EngineContract):
         return [{contract.start_key: s.start, contract.end_key: s.end} for s in value]
     if name == "peaks":
         return {contract.peaks_rate_key: value.rate, contract.peaks_values_key: list(value.values)}
+    if name == "speakers":
+        return {contract.speaker_turns_key: [
+            {contract.start_key: t.start, contract.end_key: t.end, contract.speaker_key: t.speaker}
+            for t in value
+        ]}
     if name in ("beats", "onsets"):
         return list(value)
     return value

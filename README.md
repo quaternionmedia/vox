@@ -14,7 +14,7 @@ mic/file --> speech engine (STT over HTTP) --> transcript --> vox TTS --> audio 
 audio or video --> MediaEngine.upload --+--> transcribe --> segments and words, timed
                    (the same engine,    |
                     its media surface)  +--> analyze ----> tempo, beats, onsets,
-                                                           loudness, silences, peaks
+                                                           loudness, silences, peaks, speakers
 ```
 
 - **`EngineContract`** states what an HTTP speech engine must answer: the
@@ -188,7 +188,7 @@ with MediaEngine(EngineContract(), "http://127.0.0.1:8010") as engine:
     (`start`, `end`, `text`, `words`), each word a `Word` (`start`, `end`,
     `word`, `probability`), timed in seconds of the upload;
   - an `Analysis` (`duration`, `tempo`, `beats`, `onsets`, `loudness`,
-    `silences`, `peaks`);
+    `silences`, `peaks`, `speakers`);
   - from `capabilities()`, what the engine takes and offers, and the limits
     it states: the largest upload, the longest sound, and how long an upload
     is kept.
@@ -197,6 +197,13 @@ with MediaEngine(EngineContract(), "http://127.0.0.1:8010") as engine:
   reads the answer under `silences`. `analyze(..., peaks_rate=,
   silence_db=, silence_min=)` tunes the waveform's values a second and what
   counts as a silence; each left None keeps the engine's own.
+- **`speakers` is who is speaking when, by the sound alone**: a tuple of
+  `SpeakerTurn`s (`start`, `end`, `speaker`), the speaker a label such as `A`
+  that is one voice throughout the analysis and nobody's name;
+  `Analysis.speaker_count` is how many labels there are. The engine tells
+  voices apart by how they sound, never by what they say, so two voices that
+  sound alike can come back as one, and a sound that is no voice -- music,
+  say -- can come back lettered. vox hands on what the engine said.
 - **What the contract leaves None is refused by name, before any request**,
   with `EngineDoesNotOffer`. A language or a tuning asked of an engine that
   cannot be told one is refused, not dropped: the answer would be one nobody
@@ -320,6 +327,9 @@ What stays different, and why:
   the same every time and a walkthrough can record it. A caller treats either
   as opaque.
 - **Its capabilities** name no speech model; it has none.
+- **Who is speaking** is the script's. The stand-in writes the turns alone,
+  where joe also counts the voices beside them; vox reads the turns on either
+  and counts the labels itself.
 - **The sweep.** joe sweeps uploads past their time as one arrives and on a
   clock of its own, so a delete of one is 204 until the next sweep and 404
   after. The stand-in sweeps only as an upload arrives.

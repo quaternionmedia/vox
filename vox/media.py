@@ -4,7 +4,7 @@
 an audio file, or a video whose sound the engine extracts, and asks for the
 upload's transcript -- segments, and each word, timed in seconds of the
 upload -- and for its sound's features: tempo, beats, onsets, loudness,
-silences and peaks. Then it discards the upload.
+silences, peaks and speakers. Then it discards the upload.
 
 The engine does the listening and the measuring; vox carries the file there
 and the answer back. The answer arrives as dataclasses rather than as the
@@ -52,7 +52,7 @@ DETAIL_CHARS = 500
 """The most of a refusal's reason an error carries: an engine's error page
 can be long, and the reason is at its start."""
 
-FEATURES = ("tempo", "beats", "onsets", "loudness", "silences", "peaks")
+FEATURES = ("tempo", "beats", "onsets", "loudness", "silences", "peaks", "speakers")
 """What an analysis can be asked for, in vox's names, which are `Analysis`'s
 fields. The contract names each one's spelling on the engine, or None where
 the engine does not measure it."""
@@ -242,6 +242,18 @@ class Peaks:
 
 
 @dataclass(frozen=True)
+class SpeakerTurn:
+    """A stretch in which one voice is heard, in seconds of the upload."""
+
+    start: float
+    end: float
+    speaker: str
+    """The engine's label for the voice -- a letter such as "A" -- the same for
+    every turn of that voice within one analysis, and nobody's name: the
+    engine tells voices apart by their sound and knows whose none of them is."""
+
+
+@dataclass(frozen=True)
 class Analysis:
     """What an upload's sound measures. A feature not asked for is None, and
     so is one the engine answered null."""
@@ -259,6 +271,17 @@ class Analysis:
     loudness: Loudness | None = None
     silences: tuple[Silence, ...] | None = None
     peaks: Peaks | None = None
+    speakers: tuple[SpeakerTurn, ...] | None = None
+    """Who is speaking when, by the sound alone: each turn one voice's, the
+    voices lettered. Empty when the engine heard no voice."""
+
+    @property
+    def speaker_count(self) -> int | None:
+        """How many voices were heard: the distinct labels among the turns,
+        or None when speakers were not asked for."""
+        if self.speakers is None:
+            return None
+        return len({turn.speaker for turn in self.speakers})
 
 
 @dataclass(frozen=True)
@@ -443,6 +466,22 @@ def _read_peaks(value: Any, c: EngineContract, where: str) -> Peaks | None:
     )
 
 
+def _read_speakers(value: Any, c: EngineContract, where: str) -> tuple[SpeakerTurn, ...] | None:
+    if value is None:
+        return None
+    body = _object(value, where)
+    at = f"{where}.{c.speaker_turns_key}"
+    turns = []
+    for i, item in enumerate(_list(_key(body, c.speaker_turns_key, where), at)):
+        turn = _object(item, f"{at}[{i}]")
+        turns.append(SpeakerTurn(
+            start=_number(_key(turn, c.start_key, f"{at}[{i}]"), f"{at}[{i}].{c.start_key}"),
+            end=_number(_key(turn, c.end_key, f"{at}[{i}]"), f"{at}[{i}].{c.end_key}"),
+            speaker=_text(_key(turn, c.speaker_key, f"{at}[{i}]"), f"{at}[{i}].{c.speaker_key}"),
+        ))
+    return tuple(turns)
+
+
 _FEATURE_READERS: dict[str, Callable[[Any, EngineContract, str], Any]] = {
     "tempo": lambda value, c, where: _maybe_number(value, where),
     "beats": lambda value, c, where: _times(value, where),
@@ -450,6 +489,7 @@ _FEATURE_READERS: dict[str, Callable[[Any, EngineContract, str], Any]] = {
     "loudness": _read_loudness,
     "silences": _read_silences,
     "peaks": _read_peaks,
+    "speakers": _read_speakers,
 }
 
 

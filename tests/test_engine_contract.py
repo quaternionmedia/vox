@@ -50,6 +50,7 @@ from vox.media import (
     MediaEngine,
     MediaHandle,
     Peaks,
+    SpeakerTurn,
     Segment,
     Silence,
     Transcript,
@@ -333,9 +334,10 @@ def _client(base_url: str) -> httpx.Client:
 
 
 SAID = Transcript("Hold.", "en", (Segment(0.0, 0.5, "Hold.", (Word(0.0, 0.5, " Hold.", 0.9),)),), {"model": "x"})
-TEMPO_TO_PEAKS = ("tempo", "beats", "onsets", "loudness", "silences", "peaks")
+EVERY_FEATURE = ("tempo", "beats", "onsets", "loudness", "silences", "peaks", "speakers")
 MEASURED = Analysis(tempo=100.0, beats=(0.1,), onsets=(0.0,), loudness=Loudness(-20.0, -6.0, None),
-                    silences=(Silence(0.5, 1.0),), peaks=Peaks(2.0, (0.5, 0.0)))
+                    silences=(Silence(0.5, 1.0),), peaks=Peaks(2.0, (0.5, 0.0)),
+                    speakers=(SpeakerTurn(0.0, 0.5, "A"),))
 
 NOT_HELD = "no such media: it was never uploaded here, has expired, or was deleted"
 UNDECODABLE = ("this media has no audio ffmpeg can decode: "
@@ -680,7 +682,7 @@ def test_a_media_analysis_answers_its_duration_and_each_feature_asked_for(media_
     every = client.post("/api/media/m1/analyze").json()
 
     assert some == {"duration": 1.0, "tempo": 100.0, "silences": [{"start": 0.5, "end": 1.0}]}
-    assert set(every) == {"duration", "tempo", "beats", "onsets", "loudness", "silences", "peaks"}
+    assert set(every) == {"duration", "tempo", "beats", "onsets", "loudness", "silences", "peaks", "speakers"}
     assert every["loudness"] == {"rms_db": -20.0, "peak_db": -6.0, "lufs": None}
     assert every["peaks"] == {"rate": 2.0, "values": [0.5, 0.0]}
 
@@ -711,7 +713,7 @@ def test_a_media_analysis_reads_its_features_as_joe_does(media_engine):
     unnamed = [client.post("/api/media/m1/analyze", params={"features": text}).json() for text in ("", ",,")]
 
     assert set(named) == {"duration", "tempo", "silences"}
-    assert [set(body) for body in unnamed] == [{"duration", *TEMPO_TO_PEAKS}] * 2
+    assert [set(body) for body in unnamed] == [{"duration", *EVERY_FEATURE}] * 2
 
 
 def test_a_media_analysis_refuses_a_feature_it_does_not_measure_422(media_engine):
@@ -723,7 +725,7 @@ def test_a_media_analysis_refuses_a_feature_it_does_not_measure_422(media_engine
     resp = client.post("/api/media/m1/analyze", params={"features": "tempo,silences"})
 
     assert (resp.status_code, resp.json()) == (
-        422, {"detail": "unknown feature 'silences'; vox.engine measures tempo, beats, onsets, loudness, silence, peaks"})
+        422, {"detail": "unknown feature 'silences'; vox.engine measures tempo, beats, onsets, loudness, silence, peaks, speakers"})
 
 
 def test_media_capabilities_answer_joe_s_keys(media_engine):
@@ -733,7 +735,7 @@ def test_media_capabilities_answer_joe_s_keys(media_engine):
 
     assert set(body) == {"formats", "features", "speech_model", "word_timestamps", "max_bytes",
                          "max_seconds", "ttl_seconds"}
-    assert body["features"] == ["tempo", "beats", "onsets", "loudness", "silence", "peaks"]
+    assert body["features"] == ["tempo", "beats", "onsets", "loudness", "silence", "peaks", "speakers"]
     assert "audio/x-m4a" in body["formats"] and "video/matroska" in body["formats"]
 
 
@@ -910,7 +912,7 @@ def test_a_media_analysis_refuses_every_tuning_it_refuses_at_once(media_engine):
 
 @pytest.mark.parametrize(("params", "detail"), [
     ({"peaks_rate": "0"}, "peaks_rate: Input should be greater than or equal to 1"),
-    ({"features": "pitch"}, "unknown feature 'pitch'; vox.engine measures tempo, beats, onsets, loudness, silence, peaks"),
+    ({"features": "pitch"}, "unknown feature 'pitch'; vox.engine measures tempo, beats, onsets, loudness, silence, peaks, speakers"),
     ({"features": "pitch", "silence_db": "1"}, "silence_db: Input should be less than or equal to 0"),
 ], ids=["tuning", "feature", "tuning-before-feature"])
 def test_a_media_analysis_judges_its_tuning_and_features_before_the_id(media_engine, params, detail):
@@ -960,7 +962,7 @@ def test_a_blank_parameter_is_read_as_given_not_dropped(media_engine):
     ]
 
     assert [r.status_code for r in answers] == [422, 422, 200, 200]
-    assert set(answers[2].json()) == {"duration", *TEMPO_TO_PEAKS}
+    assert set(answers[2].json()) == {"duration", *EVERY_FEATURE}
 
 
 @pytest.mark.parametrize("script", [
