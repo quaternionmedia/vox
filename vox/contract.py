@@ -207,6 +207,7 @@ class EngineContract:
     loudness_feature: str | None = "loudness"
     silences_feature: str | None = "silence"
     peaks_feature: str | None = "peaks"
+    speakers_feature: str | None = "speakers"
     """The engine's name for each feature an analysis can be asked for, sent
     in `features_param`. vox's own name is the field's, before `_feature`.
     None for a feature the engine does not measure; asking for it is then
@@ -218,9 +219,11 @@ class EngineContract:
     loudness_key: str = "loudness"
     silences_key: str = "silences"
     peaks_key: str = "peaks"
+    speakers_key: str = "speakers"
     """Where an analysis answers each feature: the tempo in beats per minute,
     beats and onsets as times in seconds, loudness as an object, silences as
-    intervals, and peaks as an object."""
+    intervals, peaks as an object, and speakers as an object holding the
+    turns."""
 
     rms_db_key: str = "rms_db"
     peak_db_key: str = "peak_db"
@@ -232,6 +235,13 @@ class EngineContract:
     peaks_values_key: str = "values"
     """Within peaks: how many values there are per second, and the values,
     each a peak level from 0 to 1 -- the outline a waveform is drawn from."""
+
+    speaker_turns_key: str = "turns"
+    speaker_key: str = "speaker"
+    """Within speakers: the turns, each an interval under `start_key` and
+    `end_key` with, under `speaker_key`, the engine's label for the voice
+    heard in it. An engine may say more beside the turns, such as how many
+    voices it heard; vox counts the labels itself."""
 
     formats_key: str = "formats"
     features_key: str = "features"

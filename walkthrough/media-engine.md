@@ -29,11 +29,11 @@ What the sound measures, asked for as `beats`, `silences` and `peaks`:
 | beats | 0.50, 1.00, 1.50, 2.00, 2.50, 3.00 |
 | silences | 1.40–1.60 |
 | peaks | 2 a second: 0.62, 0.81, 0.4, 0.77, 0.69, 0.35, 0.05 |
-| tempo, onsets, loudness | not asked for, so `None` |
+| tempo, onsets, loudness, speakers | not asked for, so `None` |
 
 What the engine said it offers, asked first:
 
-- features: `tempo`, `beats`, `onsets`, `loudness`, `silences`, `peaks`
+- features: `tempo`, `beats`, `onsets`, `loudness`, `silences`, `peaks`, `speakers`
 - word timestamps: yes
 - uploads: 20 content types, up to 1073741824 bytes
 

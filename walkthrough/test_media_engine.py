@@ -166,7 +166,7 @@ What the sound measures, asked for as `beats`, `silences` and `peaks`:
 | beats | {", ".join(_seconds(t) for t in analysis.beats)} |
 | silences | {", ".join(f"{_seconds(s.start)}–{_seconds(s.end)}" for s in analysis.silences)} |
 | peaks | {analysis.peaks.rate:g} a second: {", ".join(f"{v:g}" for v in analysis.peaks.values)} |
-| tempo, onsets, loudness | not asked for, so `None` |
+| tempo, onsets, loudness, speakers | not asked for, so `None` |
 
 What the engine said it offers, asked first:
 

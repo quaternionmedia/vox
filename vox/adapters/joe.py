@@ -3,9 +3,10 @@
 joe is an audio analysis engine: it transcribes with whisper behind
 `/api/voice/*` and records from its own machine's microphone, and behind
 `/api/media` it takes an upload -- audio, or a video whose sound it extracts
-with ffmpeg -- and answers its transcript with word times from whisper and
-its tempo, beats, onsets, loudness, silences and peaks from librosa. This
-module is the whole of vox's knowledge of it.
+with ffmpeg -- and answers its transcript with word times from whisper, its
+tempo, beats, onsets, loudness, silences and peaks from librosa, and who is
+speaking when, told apart by the sound. This module is the whole of vox's
+knowledge of it.
 
 The values here are identical to `EngineContract()`'s defaults, apart from
 `conversation`, `pause_param`, `hint_param`, `confidence_key`, `watch`,
@@ -71,17 +72,21 @@ JOE = EngineContract(
     loudness_feature="loudness",
     silences_feature="silence",
     peaks_feature="peaks",
+    speakers_feature="speakers",
     tempo_key="tempo",
     beats_key="beats",
     onsets_key="onsets",
     loudness_key="loudness",
     silences_key="silences",
     peaks_key="peaks",
+    speakers_key="speakers",
     rms_db_key="rms_db",
     peak_db_key="peak_db",
     lufs_key="lufs",
     peaks_rate_key="rate",
     peaks_values_key="values",
+    speaker_turns_key="turns",
+    speaker_key="speaker",
     formats_key="formats",
     features_key="features",
     speech_model_key="speech_model",
@@ -101,8 +106,10 @@ once the person has answered by key, held the talk key, or spoken over it.
 
 Its media surface takes an upload and keeps it until it is deleted or its
 time runs out. Asked for silences, it measures `silence` and answers under
-`silences`; every other feature is one name both ways. It refuses with
-`{"detail": ...}`, as its framework does."""
+`silences`; every other feature is one name both ways. Beside the speakers'
+turns it answers how many voices it heard, under `count`, which vox passes
+over and counts from the labels. It refuses with `{"detail": ...}`, as its
+framework does."""
 
 DEFAULT_URL = "http://127.0.0.1:8000"
 """Where `joe backend` listens unless told otherwise. A default, not a promise:

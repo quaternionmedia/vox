@@ -369,6 +369,14 @@ MUTATIONS = [
         why="A contract spelling a key wrong would read as an engine with nothing to say, rather than as a mismatch to fix.",
     ),
     Mutation(
+        name="a speaker's label is read under a fixed key",
+        path="vox/media.py",
+        find='            speaker=_text(_key(turn, c.speaker_key, f"{at}[{i}]"), f"{at}[{i}].{c.speaker_key}"),',
+        replace='            speaker=_text(_key(turn, "speaker", f"{at}[{i}]"), f"{at}[{i}].{c.speaker_key}"),',
+        catches="tests/test_contract.py::test_the_media_surface_answers_on_either_contract",
+        why="Who is speaking when, from an engine that labels its turns under another name, would be refused as malformed, and no turn would be anybody's.",
+    ),
+    Mutation(
         name="the stand-in answers the default media routes rather than its contract's",
         path="vox/engine.py",
         find="    for name, verb, attribute in _MEDIA_ROUTES:\n        template = getattr(contract, attribute)",

@@ -37,6 +37,7 @@ from vox.media import (
     Peaks,
     Segment,
     Silence,
+    SpeakerTurn,
     Transcript,
     UploadTooLarge,
     Word,
@@ -65,6 +66,7 @@ MEASURED = Analysis(
     loudness=Loudness(rms_db=-18.5, peak_db=-2.0, lufs=None),
     silences=(Silence(1.2, 1.4),),
     peaks=Peaks(rate=2.0, values=(0.1, 0.8, 0.6, 0.0)),
+    speakers=(SpeakerTurn(0.0, 1.2, "A"), SpeakerTurn(1.4, 2.0, "B")),
 )
 
 
@@ -218,7 +220,7 @@ def test_an_analysis_asks_for_every_feature_the_contract_names(engine):
     analysis = media.analyze(upload)
 
     assert analysis == replace(MEASURED, duration=2.0)
-    assert state.requests[-1] == "/api/media/m1/analyze?features=tempo%2Cbeats%2Consets%2Cloudness%2Csilence%2Cpeaks"
+    assert state.requests[-1] == "/api/media/m1/analyze?features=tempo%2Cbeats%2Consets%2Cloudness%2Csilence%2Cpeaks%2Cspeakers"
 
 
 def test_a_feature_is_asked_for_by_the_engine_s_name_and_read_back_by_vox_s(engine):
@@ -283,6 +285,21 @@ def test_one_feature_can_be_named_alone(engine):
     upload = media.upload(_wav(), "audio/wav")
 
     assert media.analyze(upload, "tempo") == Analysis(duration=2.0, tempo=96.0)
+
+
+def test_speakers_come_back_as_turns_and_their_count_is_the_labels(engine):
+    """Who is speaking when, in the engine's lettering. How many is counted
+    from the labels, so an engine that also counts is read once."""
+    media, state = engine
+    upload = media.upload(_wav(2.0), "audio/wav")
+
+    analysis = media.analyze(upload, ["speakers"])
+
+    assert state.requests[-1] == "/api/media/m1/analyze?features=speakers"
+    assert analysis == Analysis(duration=2.0, speakers=(SpeakerTurn(0.0, 1.2, "A"), SpeakerTurn(1.4, 2.0, "B")))
+    assert analysis.speaker_count == 2
+    assert Analysis(speakers=()).speaker_count == 0
+    assert Analysis(tempo=96.0).speaker_count is None
 
 
 @pytest.mark.parametrize(("features", "message"), [
@@ -409,10 +426,12 @@ JOE_ANSWERS = {
         "loudness": {"rms_db": -20.1, "peak_db": -1.5, "lufs": None},
         "silences": [{"start": 1.2, "end": 2.5}],
         "peaks": {"rate": 50, "values": [0.2, 0.9, 0.1, 0.0, 0.0]},
+        "speakers": {"count": 2, "turns": [{"start": 0.0, "end": 1.2, "speaker": "A"},
+                                          {"start": 1.3, "end": 2.5, "speaker": "B"}]},
     }),
     ("GET", "/api/media/capabilities"): (200, {
         "formats": ["audio/mpeg", "audio/wav", "video/mp4"],
-        "features": ["tempo", "beats", "onsets", "loudness", "silence", "peaks"],
+        "features": ["tempo", "beats", "onsets", "loudness", "silence", "peaks", "speakers"],
         "speech_model": "whisper-base", "word_timestamps": True,
         "max_bytes": 1073741824, "max_seconds": 7200.0, "ttl_seconds": 3600.0,
     }),
@@ -450,6 +469,7 @@ def test_the_default_contract_reads_joe_s_own_answers():
         duration=2.5, tempo=120.0, beats=(0.5, 1.0), onsets=(0.02,),
         loudness=Loudness(-20.1, -1.5, None), silences=(Silence(1.2, 2.5),),
         peaks=Peaks(50.0, (0.2, 0.9, 0.1, 0.0, 0.0)),
+        speakers=(SpeakerTurn(0.0, 1.2, "A"), SpeakerTurn(1.3, 2.5, "B")),
     )
     assert capabilities == Capabilities(
         formats=("audio/mpeg", "audio/wav", "video/mp4"), features=FEATURES, speech_model="whisper-base",
@@ -697,6 +717,10 @@ def _analyze(media):
     return media.analyze("m1", ["loudness", "silences", "peaks"])
 
 
+def _speakers(media):
+    return media.analyze("m1", ["speakers"])
+
+
 def _capabilities(media):
     return media.capabilities()
 
@@ -722,6 +746,11 @@ def _capabilities(media):
     (_analyze, {"loudness": None, "silences": [{"start": 1.0}], "peaks": None}, "silences[0] has no 'end'"),
     (_analyze, {"loudness": None, "silences": None, "peaks": {"rate": 2, "values": [0.1, "loud"]}},
      'peaks.values[1] is "loud", not a number'),
+    (_speakers, {"speakers": []}, "speakers is [], not an object"),
+    (_speakers, {"speakers": {"count": 1}}, "speakers has no 'turns'"),
+    (_speakers, {"speakers": {"turns": [{"start": 0.0, "end": 1.0}]}}, "speakers.turns[0] has no 'speaker'"),
+    (_speakers, {"speakers": {"turns": [{"start": 0.0, "end": 1.0, "speaker": 1}]}},
+     "speakers.turns[0].speaker is 1, not text"),
     (_capabilities, {"features": []}, "the answer has no 'formats'"),
     (_capabilities, {"formats": ["wav"], "features": "tempo"}, 'features is "tempo", not a list'),
 ])
